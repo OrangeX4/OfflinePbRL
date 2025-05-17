@@ -8,13 +8,13 @@ import numpy as np
 import torch
 
 
-from offlinerlkit.nets import MLP
-from offlinerlkit.modules import ActorProb, Critic, DiagGaussian
-from offlinerlkit.utils.load_dataset import qlearning_dataset
-from offlinerlkit.buffer import ReplayBuffer
-from offlinerlkit.utils.logger import Logger, make_log_dirs
-from offlinerlkit.policy_trainer import MFPolicyTrainer
-from offlinerlkit.policy import IQLPolicy
+from offlinepbrl.nets import MLP
+from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
+from offlinepbrl.utils.load_dataset import qlearning_dataset
+from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.utils.logger import Logger, make_log_dirs
+from offlinepbrl.policy_trainer import MFPolicyTrainer
+from offlinepbrl.policy import IQLPolicy
 
 """
 suggested hypers

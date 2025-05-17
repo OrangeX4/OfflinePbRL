@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-        name='offlinerlkit',
+        name='offlinepbrl',
         version="0.0.1",
         description=(
             'OfflineRL-kit'

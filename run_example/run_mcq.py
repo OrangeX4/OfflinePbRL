@@ -8,13 +8,13 @@ import numpy as np
 import torch
 
 
-from offlinerlkit.nets import MLP, VAE
-from offlinerlkit.modules import ActorProb, Critic, TanhDiagGaussian
-from offlinerlkit.utils.load_dataset import qlearning_dataset
-from offlinerlkit.buffer import ReplayBuffer
-from offlinerlkit.utils.logger import Logger, make_log_dirs
-from offlinerlkit.policy_trainer import MFPolicyTrainer
-from offlinerlkit.policy import MCQPolicy
+from offlinepbrl.nets import MLP, VAE
+from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian
+from offlinepbrl.utils.load_dataset import qlearning_dataset
+from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.utils.logger import Logger, make_log_dirs
+from offlinepbrl.policy_trainer import MFPolicyTrainer
+from offlinepbrl.policy import MCQPolicy
 
 
 def get_args():

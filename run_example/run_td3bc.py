@@ -8,15 +8,15 @@ import numpy as np
 import torch
 
 
-from offlinerlkit.nets import MLP
-from offlinerlkit.modules import Actor, Critic
-from offlinerlkit.utils.noise import GaussianNoise
-from offlinerlkit.utils.load_dataset import qlearning_dataset
-from offlinerlkit.utils.scaler import StandardScaler
-from offlinerlkit.buffer import ReplayBuffer
-from offlinerlkit.utils.logger import Logger, make_log_dirs
-from offlinerlkit.policy_trainer import MFPolicyTrainer
-from offlinerlkit.policy import TD3BCPolicy
+from offlinepbrl.nets import MLP
+from offlinepbrl.modules import Actor, Critic
+from offlinepbrl.utils.noise import GaussianNoise
+from offlinepbrl.utils.load_dataset import qlearning_dataset
+from offlinepbrl.utils.scaler import StandardScaler
+from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.utils.logger import Logger, make_log_dirs
+from offlinepbrl.policy_trainer import MFPolicyTrainer
+from offlinepbrl.policy import TD3BCPolicy
 
 
 """

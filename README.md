@@ -4,11 +4,11 @@
 
 ---
 
-# OfflineRL-Kit: An elegant PyTorch offline reinforcement learning library.
+# OfflinePbRL: An elegant PyTorch offline reinforcement learning library.
 
 ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
-OfflineRL-Kit is an offline reinforcement learning library based on pure PyTorch. This library has some features which are friendly and convenient for researchers, including:
+OfflinePbRL is an offline reinforcement learning library based on pure PyTorch. This library has some features which are friendly and convenient for researchers, including:
 
 - Elegant framework, the code structure is very clear and easy to use
 - State-of-the-art offline RL algorithms, including model-free and model-based approaches
@@ -55,16 +55,16 @@ cd d4rl
 pip install -e .
 ```
 
-Finally, install our OfflineRL-Kit!
+Finally, install our OfflinePbRL!
 ```shell
-git clone https://github.com/yihaosun1124/OfflineRL-Kit.git
-cd OfflineRL-Kit
-python setup.py install
+git clone https://github.com/OrangeX4/OfflinePbRL.git
+cd OfflinePbRL
+python setup.py install 
 ```
 
 ## Quick Start
 ### Train
-This is an example of CQL. You can also run the full script at [run_example/run_cql.py](https://github.com/yihaosun1124/OfflineRL-Kit/blob/main/run_example/run_cql.py).
+This is an example of CQL. You can also run the full script at [run_example/run_cql.py](https://github.com/OrangeX4/OfflinePbRL/blob/main/run_example/run_cql.py).
 
 First, make an environment and get the offline dataset:
 
@@ -177,7 +177,7 @@ analysis = tune.run(
     }
 )
 ```
-You can see the full script at [tune_example/tune_mopo.py](https://github.com/yihaosun1124/OfflineRL-Kit/blob/main/tune_example/tune_mopo.py).
+You can see the full script at [tune_example/tune_mopo.py](https://github.com/OrangeX4/OfflinePbRL/blob/main/tune_example/tune_mopo.py).
 
 ### Log
 Our logger supports a variant of record file types, including .txt(backup for stdout), .csv(records loss or performance or other metrics in training progress), .tfevents (tensorboard for visualizing the training curve), .json(backup for hyper-parameters).
@@ -198,11 +198,11 @@ Our logger also has a clear log structure:
         |   └─seed_1&timestamp_xxx
         └─algo_1
 ```
-This is an example of logger and you can see the full script at [offlinerlkit/policy_trainer/mb_policy_trainer.py](https://github.com/yihaosun1124/OfflineRL-Kit/blob/main/offlinerlkit/policy_trainer/mb_policy_trainer.py).
+This is an example of logger and you can see the full script at [offlinepbrl/policy_trainer/mb_policy_trainer.py](https://github.com/OrangeX4/OfflinePbRL/blob/main/offlinepbrl/policy_trainer/mb_policy_trainer.py).
 
 First, import some relevant packages:
 ```python
-from offlinerlkit.utils.logger import Logger, make_log_dirs
+from offlinepbrl.utils.logger import Logger, make_log_dirs
 ```
 Then initialize logger:
 ```py
@@ -234,17 +234,4 @@ logger.dumpkvs()
 ### Plot
 ```shell
 python run_example/plotter.py --algos "mopo" "cql" --task "hopper-medium-replay-v2"
-```
-
-## Citing OfflineRL-Kit
-If you use OfflineRL-Kit in your work, please use the following bibtex
-```tex
-@misc{offinerlkit,
-  author = {Yihao Sun},
-  title = {OfflineRL-Kit: An Elegant PyTorch Offline Reinforcement Learning Library},
-  year = {2023},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/yihaosun1124/OfflineRL-Kit}},
-}
 ```

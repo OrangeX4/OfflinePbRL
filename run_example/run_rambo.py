@@ -8,15 +8,15 @@ import numpy as np
 import torch
 
 
-from offlinerlkit.nets import MLP
-from offlinerlkit.modules import ActorProb, Critic, TanhDiagGaussian, EnsembleDynamicsModel
-from offlinerlkit.dynamics import EnsembleDynamics
-from offlinerlkit.utils.scaler import StandardScaler
-from offlinerlkit.utils.termination_fns import get_termination_fn, obs_unnormalization
-from offlinerlkit.buffer import ReplayBuffer
-from offlinerlkit.utils.logger import Logger, make_log_dirs
-from offlinerlkit.policy_trainer import MBPolicyTrainer
-from offlinerlkit.policy import RAMBOPolicy
+from offlinepbrl.nets import MLP
+from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian, EnsembleDynamicsModel
+from offlinepbrl.dynamics import EnsembleDynamics
+from offlinepbrl.utils.scaler import StandardScaler
+from offlinepbrl.utils.termination_fns import get_termination_fn, obs_unnormalization
+from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.utils.logger import Logger, make_log_dirs
+from offlinepbrl.policy_trainer import MBPolicyTrainer
+from offlinepbrl.policy import RAMBOPolicy
 
 
 """
