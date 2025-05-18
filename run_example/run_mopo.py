@@ -212,9 +212,14 @@ def train(args=get_args()):
     )
 
     # train
+    offline_data = real_buffer.sample_all()
     if not load_dynamics_model:
-        dynamics.train(real_buffer.sample_all(), logger, max_epochs_since_update=5)
-    
+        dynamics.train(offline_data, logger, max_epochs=50, max_epochs_since_update=None)
+    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'])
+    logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
+    logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
+    logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+
     policy_trainer.train()
 
 

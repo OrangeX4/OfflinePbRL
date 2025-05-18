@@ -29,7 +29,7 @@ class EnsembleDynamics(BaseDynamics):
     def step(
         self,
         obs: np.ndarray,
-        action: np.ndarray
+        action: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
         "imagine single forward step"
         obs_act = np.concatenate([obs, action], axis=-1)
@@ -72,8 +72,37 @@ class EnsembleDynamics(BaseDynamics):
             info["penalty"] = penalty
         
         return next_obs, reward, terminal, info
-    
-    @ torch.no_grad()
+
+    @torch.no_grad()
+    def step_batch(
+        self,
+        obs: np.ndarray,
+        action: np.ndarray,
+        batch_size: int = 4096,
+    ) -> np.ndarray:
+        next_obss = np.zeros_like(obs)
+        rewards = np.zeros((*obs.shape[:-1], 1), dtype=np.float32)
+        terminals = np.zeros((*obs.shape[:-1], 1), dtype=np.float32)
+        info = {}
+        data_size = obs.shape[0]
+        for start in range(0, data_size, batch_size):
+            end = min(start + batch_size, data_size)
+            obs_batch = obs[start:end]
+            action_batch = action[start:end]
+            next_obs_batch, reward_batch, terminal_batch, info_batch = self.step(obs_batch, action_batch)
+            next_obss[start:end] = next_obs_batch
+            rewards[start:end] = reward_batch
+            terminals[start:end] = terminal_batch
+            for k, v in info_batch.items():
+                if k not in info:
+                    info[k] = [v]
+                else:
+                    info[k].append(v)
+        for k, v in info.items():
+            info[k] = np.concatenate(v, axis=0)
+        return next_obss, rewards, terminals, info
+
+    @torch.no_grad()
     def sample_next_obss(
         self,
         obs: torch.Tensor,
@@ -108,11 +137,12 @@ class EnsembleDynamics(BaseDynamics):
         data: Dict,
         logger: Logger,
         max_epochs: Optional[float] = None,
-        max_epochs_since_update: int = 5,
+        max_epochs_since_update: Optional[int] = 5,
         batch_size: int = 256,
         holdout_ratio: float = 0.2,
         logvar_loss_coef: float = 0.01
     ) -> None:
+        assert max_epochs or max_epochs_since_update, "Either max_epochs or max_epochs_since_update should be set"
         inputs, targets = self.format_samples_for_training(data)
         data_size = inputs.shape[0]
         holdout_size = min(int(data_size * holdout_ratio), 1000)
@@ -160,7 +190,7 @@ class EnsembleDynamics(BaseDynamics):
             else:
                 cnt += 1
             
-            if (cnt >= max_epochs_since_update) or (max_epochs and (epoch >= max_epochs)):
+            if (max_epochs_since_update and (cnt >= max_epochs_since_update)) or (max_epochs and (epoch >= max_epochs)):
                 break
 
         indexes = self.select_elites(holdout_losses)
@@ -314,12 +344,14 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         rlhf_dataset: Dict,
         logger: Logger,
         max_epochs: Optional[float] = None,
-        max_epochs_since_update: int = 5,
+        max_epochs_since_update: Optional[int] = 5,
         dynamics_batch_size: int = 256,
         rlhf_batch_size: int = 32,
         holdout_ratio: float = 0.2,
         logvar_loss_coef: float = 0.01
     ) -> None:
+        assert max_epochs or max_epochs_since_update, "Either max_epochs or max_epochs_since_update should be set"
+
         holdout_losses = [1e10 for i in range(self.model.num_ensemble)]
 
         def shuffle_rows(arr):
@@ -389,6 +421,7 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             logger.logkv("info/rlhf_accuracy", info["accuracies"].mean().item())
             logger.logkv("info/reward_mean", info["rewards"].mean().item())
             logger.logkv("info/reward_std", info["rewards"].std().item())
+            logger.logkv("info/std_mean", info["std"].mean().item())
             logger.logkv("info/reward_win_mean", info["rewards_win"].mean().item())
             logger.logkv("info/reward_win_std", info["rewards_win"].std().item())
             logger.logkv("info/reward_lose_mean", info["rewards_lose"].mean().item())
@@ -414,7 +447,7 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             else:
                 cnt += 1
             
-            if (cnt >= max_epochs_since_update) or (max_epochs and (epoch >= max_epochs)):
+            if (max_epochs_since_update and (cnt >= max_epochs_since_update)) or (max_epochs and (epoch >= max_epochs)):
                 break
 
         indexes = self.select_elites(holdout_losses)
@@ -484,7 +517,7 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             std = torch.sqrt(torch.cat([torch.exp(logvar_1), torch.exp(logvar_2)], dim=2).sum(dim=2))
             probs = gaussian_cdf(logits / std)
             # Average over batch and dim, sum over ensembles.
-            xent_loss_inv = (labels_batch[..., 0] * torch.log(probs + 1e-8) + labels_batch[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1)
+            xent_loss_inv = -((labels_batch[..., 0] * torch.log(probs + 1e-8) + labels_batch[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1))
             var_loss = logvar_1.mean(dim=(1, 2)) + logvar_2.mean(dim=(1, 2))
             loss = xent_loss_inv.sum() + var_loss.sum()
             loss = loss + self.model.get_decay_loss()
@@ -508,12 +541,12 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         rlhf_mean_1, logvar_1 = self.model(rlhf_inputs_1.reshape(-1, M))
         N = rlhf_mean_1.shape[0]
         rlhf_labels = torch.as_tensor(rlhf_labels).to(self.model.device).unsqueeze(0).repeat(N, *[1] * len(rlhf_labels.shape))
-        reward_mean_1, logvar_1 = rlhf_mean_1.reshape(N, *P, -1)[..., -1], logvar_1.reshape(*P, -1)[..., -1]
+        reward_mean_1, logvar_1 = rlhf_mean_1.reshape(N, *P, -1)[..., -1], logvar_1.reshape(N, *P, -1)[..., -1]
         rlhf_mean_2, logvar_2 = self.model(rlhf_inputs_2.reshape(-1, M))
-        reward_mean_2, logvar_2 = rlhf_mean_2.reshape(N, *P, -1)[..., -1], logvar_2.reshape(*P, -1)[..., -1]
+        reward_mean_2, logvar_2 = rlhf_mean_2.reshape(N, *P, -1)[..., -1], logvar_2.reshape(N, *P, -1)[..., -1]
         logits = reward_mean_1.sum(dim=2) - reward_mean_2.sum(dim=2)
         probs = gaussian_cdf(logits)
-        rlhf_loss = (rlhf_labels[..., 0] * torch.log(probs + 1e-8) + rlhf_labels[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1)
+        rlhf_loss = -(rlhf_labels[..., 0] * torch.log(probs + 1e-8) + rlhf_labels[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1)
         accuracies = ((logits > 0).float() == rlhf_labels[..., 0]).float().cpu().numpy()
         rewards_win = torch.where((rlhf_labels[..., 0] == 1).unsqueeze(-1), reward_mean_1, reward_mean_2)
         rewards_lose = torch.where((rlhf_labels[..., 1] == 1).unsqueeze(-1), reward_mean_1, reward_mean_2)
@@ -524,5 +557,6 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             'rewards': torch.cat([reward_mean_1, reward_mean_2], dim=2).cpu().numpy(),
             'rewards_win': rewards_win,
             'rewards_lose': rewards_lose,
+            'std': torch.cat([torch.sqrt(torch.exp(logvar_1)), torch.sqrt(torch.exp(logvar_2))], dim=2).cpu().numpy(),
         }
         return val_loss, info

@@ -113,3 +113,7 @@ class ReplayBuffer:
             "terminals": self.terminals[:self._size].copy(),
             "rewards": self.rewards[:self._size].copy()
         }
+
+    def update_all_rewards(self, rewards: np.ndarray) -> None:
+        assert len(rewards) == self._size
+        self.rewards[:self._size] = rewards.reshape(-1, 1)

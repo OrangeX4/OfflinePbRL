@@ -57,10 +57,11 @@ def get_args():
     parser.add_argument("--dynamics-weight-decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
     parser.add_argument("--n-ensemble", type=int, default=7)
     parser.add_argument("--n-elites", type=int, default=5)
+    parser.add_argument("--reward-activation", type=str, default="sigmoid")
     parser.add_argument("--rollout-freq", type=int, default=1000)
     parser.add_argument("--rollout-batch-size", type=int, default=50000)
     parser.add_argument("--rollout-length", type=int, default=1)
-    parser.add_argument("--penalty-coef", type=float, default=2.5)
+    parser.add_argument("--penalty-coef", type=float, default=0.025)
     parser.add_argument("--model-retain-epochs", type=int, default=5)
     parser.add_argument("--real-ratio", type=float, default=0.05)
     parser.add_argument("--load-dynamics-path", type=str, default=None)
@@ -73,6 +74,17 @@ def get_args():
 
     return parser.parse_args()
 
+def get_activation(name):
+    if name == "sigmoid":
+        return torch.nn.Sigmoid
+    elif name == "tanh":
+        return torch.nn.Tanh
+    elif name == "relu":
+        return torch.nn.ReLU
+    elif name == "leaky_relu":
+        return torch.nn.LeakyReLU
+    else:
+        raise ValueError(f"Unknown reward activation: {name}")
 
 def train(args=get_args()):
     # create env and dataset
@@ -131,6 +143,7 @@ def train(args=get_args()):
         hidden_dims=args.dynamics_hidden_dims,
         num_ensemble=args.n_ensemble,
         num_elites=args.n_elites,
+        reward_activation=get_activation(args.reward_activation),
         weight_decays=args.dynamics_weight_decay,
         device=args.device
     )
@@ -213,9 +226,15 @@ def train(args=get_args()):
     )
 
     # train
+    offline_data = real_buffer.sample_all()
     if not load_dynamics_model:
-        dynamics.train(real_buffer.sample_all(), rlhf_dataset, logger, max_epochs_since_update=5)
-    
+        dynamics.train(offline_data, rlhf_dataset, logger, max_epochs=50, max_epochs_since_update=None)
+    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'])
+    real_buffer.update_all_rewards(pred_rewards)
+    logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
+    logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
+    logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+
     policy_trainer.train()
 
 
