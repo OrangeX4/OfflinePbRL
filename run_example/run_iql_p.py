@@ -8,13 +8,17 @@ import numpy as np
 import torch
 
 
-from offlinepbrl.nets import MLP
+from offlinepbrl.dynamics.ensemble_dynamics import EnsemblePreferenceDynamics
+from offlinepbrl.modules.dynamics_module import EnsembleDynamicsModel
+from offlinepbrl.nets import MLP, get_activation
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
-from offlinepbrl.utils.load_dataset import qlearning_dataset
+from offlinepbrl.utils.load_dataset import load_rlhf_dataset, qlearning_dataset
 from offlinepbrl.buffer import ReplayBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
 from offlinepbrl.policy import IQLPolicy
+from offlinepbrl.utils.scaler import StandardScaler
+from offlinepbrl.utils.termination_fns import get_termination_fn
 
 """
 suggested hypers
@@ -24,7 +28,7 @@ expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="iql")
+    parser.add_argument("--algo-name", type=str, default="iql_p")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256])
@@ -37,6 +41,17 @@ def get_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--expectile", type=float, default=0.7)
     parser.add_argument("--temperature", type=float, default=3.0)
+
+    parser.add_argument("--dynamics-lr", type=float, default=1e-3)
+    parser.add_argument("--dynamics-hidden-dims", type=int, nargs='*', default=[200, 200, 200, 200])
+    parser.add_argument("--dynamics-weight-decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
+    parser.add_argument("--n-ensemble", type=int, default=7)
+    parser.add_argument("--n-elites", type=int, default=5)
+    parser.add_argument("--reward-activation", type=str, default="sigmoid")
+    parser.add_argument("--ensemble-reward", type=bool, default=True)
+    parser.add_argument("--penalty-coef", type=float, default=0.025)
+    parser.add_argument("--load-dynamics-path", type=str, default=None)
+
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step-per-epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
@@ -86,6 +101,7 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
+    rlhf_dataset = load_rlhf_dataset(env, dataset)
     if 'antmaze' in args.task:
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
@@ -134,6 +150,35 @@ def train(args=get_args()):
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
     else:
         lr_scheduler = None
+
+    # create dynamics
+    load_dynamics_model = True if args.load_dynamics_path else False
+    dynamics_model = EnsembleDynamicsModel(
+        obs_dim=np.prod(args.obs_shape),
+        action_dim=args.action_dim,
+        hidden_dims=args.dynamics_hidden_dims,
+        num_ensemble=args.n_ensemble,
+        num_elites=args.n_elites,
+        reward_activation=get_activation(args.reward_activation),
+        weight_decays=args.dynamics_weight_decay,
+        device=args.device
+    )
+    dynamics_optim = torch.optim.Adam(
+        dynamics_model.parameters(),
+        lr=args.dynamics_lr
+    )
+    scaler = StandardScaler()
+    termination_fn = get_termination_fn(task=args.task)
+    dynamics = EnsemblePreferenceDynamics(
+        dynamics_model,
+        dynamics_optim,
+        scaler,
+        termination_fn,
+        penalty_coef=args.penalty_coef,
+    )
+
+    if args.load_dynamics_path:
+        dynamics.load(args.load_dynamics_path)
     
     # create IQL policy
     policy = IQLPolicy(
@@ -164,7 +209,7 @@ def train(args=get_args()):
     buffer.load_dataset(dataset)
 
     # log
-    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args), record_params=["ensemble_reward", "penalty_coef"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -188,6 +233,16 @@ def train(args=get_args()):
     )
 
     # train
+    offline_data = buffer.sample_all()
+    if not load_dynamics_model:
+        dynamics.train(offline_data, rlhf_dataset, logger, max_epochs=50, max_epochs_since_update=None)
+    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'], ensemble_reward=args.ensemble_reward)
+    buffer.update_all_rewards(pred_rewards)
+    logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
+    logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
+    if 'penalty' in pred_info:
+        logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+
     policy_trainer.train()
 
 

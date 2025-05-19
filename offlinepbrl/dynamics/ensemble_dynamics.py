@@ -25,11 +25,13 @@ class EnsembleDynamics(BaseDynamics):
         self._penalty_coef = penalty_coef
         self._uncertainty_mode = uncertainty_mode
 
-    @ torch.no_grad()
+    @torch.no_grad()
     def step(
         self,
         obs: np.ndarray,
         action: np.ndarray,
+        ensemble_reward: bool = False,
+        deterministic_reward: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
         "imagine single forward step"
         obs_act = np.concatenate([obs, action], axis=-1)
@@ -40,7 +42,10 @@ class EnsembleDynamics(BaseDynamics):
         mean[..., :-1] += obs
         std = np.sqrt(np.exp(logvar))
 
-        ensemble_samples = (mean + np.random.normal(size=mean.shape) * std).astype(np.float32)
+        if deterministic_reward:
+            ensemble_samples = (mean + np.random.normal(size=mean.shape) * np.concat(std[..., :-1], np.zeros_like(std[..., -1:]), axis=-1)).astype(np.float32)
+        else:
+            ensemble_samples = (mean + np.random.normal(size=mean.shape) * std).astype(np.float32)
 
         # choose one model from ensemble
         num_models, batch_size, _ = ensemble_samples.shape
@@ -48,7 +53,10 @@ class EnsembleDynamics(BaseDynamics):
         samples = ensemble_samples[model_idxs, np.arange(batch_size)]
         
         next_obs = samples[..., :-1]
-        reward = samples[..., -1:]
+        if ensemble_reward:
+            reward = mean[..., -1:].mean(axis=0)
+        else:
+            reward = samples[..., -1:]
         terminal = self.terminal_fn(obs, action, next_obs)
         info = {}
         info["raw_reward"] = reward
@@ -79,6 +87,8 @@ class EnsembleDynamics(BaseDynamics):
         obs: np.ndarray,
         action: np.ndarray,
         batch_size: int = 4096,
+        ensemble_reward: bool = False,
+        deterministic_reward: bool = False,
     ) -> np.ndarray:
         next_obss = np.zeros_like(obs)
         rewards = np.zeros((*obs.shape[:-1], 1), dtype=np.float32)
@@ -89,7 +99,7 @@ class EnsembleDynamics(BaseDynamics):
             end = min(start + batch_size, data_size)
             obs_batch = obs[start:end]
             action_batch = action[start:end]
-            next_obs_batch, reward_batch, terminal_batch, info_batch = self.step(obs_batch, action_batch)
+            next_obs_batch, reward_batch, terminal_batch, info_batch = self.step(obs_batch, action_batch, ensemble_reward, deterministic_reward)
             next_obss[start:end] = next_obs_batch
             rewards[start:end] = reward_batch
             terminals[start:end] = terminal_batch
@@ -270,54 +280,6 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         uncertainty_mode: str = "aleatoric"
     ) -> None:
         super().__init__(model, optim, scaler, terminal_fn, penalty_coef, uncertainty_mode)
-
-    @torch.no_grad()
-    def step(
-        self,
-        obs: np.ndarray,
-        action: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
-        "imagine single forward step"
-        obs_act = np.concatenate([obs, action], axis=-1)
-        obs_act = self.scaler.transform(obs_act)
-        mean, logvar = self.model(obs_act)
-        mean = mean.cpu().numpy()
-        logvar = logvar.cpu().numpy()
-        mean[..., :-1] += obs
-        std = np.sqrt(np.exp(logvar))
-
-        ensemble_samples = (mean + np.random.normal(size=mean.shape) * std).astype(np.float32)
-
-        # choose one model from ensemble
-        num_models, batch_size, _ = ensemble_samples.shape
-        model_idxs = self.model.random_elite_idxs(batch_size)
-        samples = ensemble_samples[model_idxs, np.arange(batch_size)]
-        
-        next_obs = samples[..., :-1]
-        reward = samples[..., -1:]
-        terminal = self.terminal_fn(obs, action, next_obs)
-        info = {}
-        info["raw_reward"] = reward
-
-        if self._penalty_coef:
-            if self._uncertainty_mode == "aleatoric":
-                penalty = np.amax(np.linalg.norm(std, axis=2), axis=0)
-            elif self._uncertainty_mode == "pairwise-diff":
-                next_obses_mean = mean[..., :-1]
-                next_obs_mean = np.mean(next_obses_mean, axis=0)
-                diff = next_obses_mean - next_obs_mean
-                penalty = np.amax(np.linalg.norm(diff, axis=2), axis=0)
-            elif self._uncertainty_mode == "ensemble_std":
-                next_obses_mean = mean[..., :-1]
-                penalty = np.sqrt(next_obses_mean.var(0).mean(1))
-            else:
-                raise ValueError
-            penalty = np.expand_dims(penalty, 1).astype(np.float32)
-            assert penalty.shape == reward.shape
-            reward = reward - self._penalty_coef * penalty
-            info["penalty"] = penalty
-        
-        return next_obs, reward, terminal, info
 
     def format_samples_for_training(self, dataset: Dict, rlhf_dataset: Dict) -> Tuple[np.ndarray, np.ndarray]:
         # offline dynamics dataset

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 
-from offlinepbrl.nets import MLP
+from offlinepbrl.nets import MLP, get_activation
 from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian, EnsembleDynamicsModel
 from offlinepbrl.dynamics import EnsemblePreferenceDynamics
 from offlinepbrl.utils.scaler import StandardScaler
@@ -73,18 +73,6 @@ def get_args():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()
-
-def get_activation(name):
-    if name == "sigmoid":
-        return torch.nn.Sigmoid
-    elif name == "tanh":
-        return torch.nn.Tanh
-    elif name == "relu":
-        return torch.nn.ReLU
-    elif name == "leaky_relu":
-        return torch.nn.LeakyReLU
-    else:
-        raise ValueError(f"Unknown reward activation: {name}")
 
 def train(args=get_args()):
     # create env and dataset
