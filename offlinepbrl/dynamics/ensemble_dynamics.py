@@ -17,12 +17,16 @@ class EnsembleDynamics(BaseDynamics):
         scaler: StandardScaler,
         terminal_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
         penalty_coef: float = 0.0,
-        uncertainty_mode: str = "aleatoric"
+        default_ensemble_reward: bool = False,
+        default_deterministic_reward: bool = False,
+        uncertainty_mode: str = "aleatoric",
     ) -> None:
         super().__init__(model, optim)
         self.scaler = scaler
         self.terminal_fn = terminal_fn
         self._penalty_coef = penalty_coef
+        self._default_ensemble_reward = default_ensemble_reward
+        self._default_deterministic_reward = default_deterministic_reward
         self._uncertainty_mode = uncertainty_mode
 
     @torch.no_grad()
@@ -30,10 +34,15 @@ class EnsembleDynamics(BaseDynamics):
         self,
         obs: np.ndarray,
         action: np.ndarray,
-        ensemble_reward: bool = False,
-        deterministic_reward: bool = False,
+        ensemble_reward: Optional[bool] = None,
+        deterministic_reward: Optional[bool] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
         "imagine single forward step"
+        if ensemble_reward is None:
+            ensemble_reward = self._default_ensemble_reward
+        if deterministic_reward is None:
+            deterministic_reward = self._default_deterministic_reward
+
         obs_act = np.concatenate([obs, action], axis=-1)
         obs_act = self.scaler.transform(obs_act)
         mean, logvar = self.model(obs_act)
@@ -64,6 +73,8 @@ class EnsembleDynamics(BaseDynamics):
         if self._penalty_coef:
             if self._uncertainty_mode == "aleatoric":
                 penalty = np.amax(np.linalg.norm(std, axis=2), axis=0)
+            elif self._uncertainty_mode == "aleatoric-dynamics":
+                penalty = np.amax(np.linalg.norm(std[..., :-1], axis=2), axis=0)
             elif self._uncertainty_mode == "pairwise-diff":
                 next_obses_mean = mean[..., :-1]
                 next_obs_mean = np.mean(next_obses_mean, axis=0)
@@ -78,7 +89,7 @@ class EnsembleDynamics(BaseDynamics):
             assert penalty.shape == reward.shape
             reward = reward - self._penalty_coef * penalty
             info["penalty"] = penalty
-        
+
         return next_obs, reward, terminal, info
 
     @torch.no_grad()
@@ -87,8 +98,8 @@ class EnsembleDynamics(BaseDynamics):
         obs: np.ndarray,
         action: np.ndarray,
         batch_size: int = 4096,
-        ensemble_reward: bool = False,
-        deterministic_reward: bool = False,
+        ensemble_reward: Optional[bool] = None,
+        deterministic_reward: Optional[bool] = None,
     ) -> np.ndarray:
         next_obss = np.zeros_like(obs)
         rewards = np.zeros((*obs.shape[:-1], 1), dtype=np.float32)
@@ -277,9 +288,11 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         scaler: StandardScaler,
         terminal_fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
         penalty_coef: float = 0.0,
-        uncertainty_mode: str = "aleatoric"
+        default_ensemble_reward: bool = False,
+        default_deterministic_reward: bool = False,
+        uncertainty_mode: str = "aleatoric",
     ) -> None:
-        super().__init__(model, optim, scaler, terminal_fn, penalty_coef, uncertainty_mode)
+        super().__init__(model, optim, scaler, terminal_fn, penalty_coef, default_ensemble_reward, default_deterministic_reward, uncertainty_mode)
 
     def format_samples_for_training(self, dataset: Dict, rlhf_dataset: Dict) -> Tuple[np.ndarray, np.ndarray]:
         # offline dynamics dataset

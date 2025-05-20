@@ -218,7 +218,8 @@ def train(args=get_args()):
     _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'])
     logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
     logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
-    logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+    if 'penalty' in pred_info:
+        logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
 
     policy_trainer.train()
 

@@ -58,9 +58,11 @@ def get_args():
     parser.add_argument("--n-ensemble", type=int, default=7)
     parser.add_argument("--n-elites", type=int, default=5)
     parser.add_argument("--reward-activation", type=str, default="sigmoid")
+    parser.add_argument("--ensemble-reward", type=bool, default=True)
     parser.add_argument("--rollout-freq", type=int, default=1000)
     parser.add_argument("--rollout-batch-size", type=int, default=50000)
     parser.add_argument("--rollout-length", type=int, default=1)
+    parser.add_argument("--uncertainty-mode", type=str, default="aleatoric")
     parser.add_argument("--penalty-coef", type=float, default=0.025)
     parser.add_argument("--model-retain-epochs", type=int, default=5)
     parser.add_argument("--real-ratio", type=float, default=0.05)
@@ -146,7 +148,9 @@ def train(args=get_args()):
         dynamics_optim,
         scaler,
         termination_fn,
+        default_ensemble_reward=args.ensemble_reward,
         penalty_coef=args.penalty_coef,
+        uncertainty_mode=args.uncertainty_mode,
     )
 
     if args.load_dynamics_path:
@@ -186,7 +190,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args), record_params=["penalty_coef", "rollout_length"])
+    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args), record_params=["uncertainty_mode", "ensemble_reward", "penalty_coef", "rollout_length"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -221,7 +225,8 @@ def train(args=get_args()):
     real_buffer.update_all_rewards(pred_rewards)
     logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
     logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
-    logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+    if 'penalty' in pred_info:
+        logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
 
     policy_trainer.train()
 

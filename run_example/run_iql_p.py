@@ -174,6 +174,7 @@ def train(args=get_args()):
         dynamics_optim,
         scaler,
         termination_fn,
+        default_ensemble_reward=args.ensemble_reward,
         penalty_coef=args.penalty_coef,
     )
 
@@ -236,7 +237,7 @@ def train(args=get_args()):
     offline_data = buffer.sample_all()
     if not load_dynamics_model:
         dynamics.train(offline_data, rlhf_dataset, logger, max_epochs=50, max_epochs_since_update=None)
-    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'], ensemble_reward=args.ensemble_reward)
+    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'])
     buffer.update_all_rewards(pred_rewards)
     logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
     logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
