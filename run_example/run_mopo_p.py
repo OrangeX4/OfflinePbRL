@@ -133,6 +133,7 @@ def train(args=get_args()):
         hidden_dims=args.dynamics_hidden_dims,
         num_ensemble=args.n_ensemble,
         num_elites=args.n_elites,
+        reward_model=MLP(input_dim=args.dynamics_hidden_dims[-1], hidden_dims=[args.dynamics_hidden_dims[-1]], output_dim=2),
         reward_activation=get_activation(args.reward_activation),
         weight_decays=args.dynamics_weight_decay,
         device=args.device
