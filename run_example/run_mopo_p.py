@@ -63,6 +63,7 @@ def get_args():
     parser.add_argument("--rollout-batch-size", type=int, default=50000)
     parser.add_argument("--rollout-length", type=int, default=1)
     parser.add_argument("--uncertainty-mode", type=str, default="aleatoric")
+    parser.add_argument("--reward-uncertainty-mode", type=str, default="aleatoric-reward")
     parser.add_argument("--penalty-coef", type=float, default=0.025)
     parser.add_argument("--model-retain-epochs", type=int, default=5)
     parser.add_argument("--real-ratio", type=float, default=0.05)
@@ -133,7 +134,7 @@ def train(args=get_args()):
         hidden_dims=args.dynamics_hidden_dims,
         num_ensemble=args.n_ensemble,
         num_elites=args.n_elites,
-        reward_model=MLP(input_dim=args.dynamics_hidden_dims[-1], hidden_dims=[args.dynamics_hidden_dims[-1]], output_dim=2),
+        # reward_model=MLP(input_dim=args.dynamics_hidden_dims[-1], hidden_dims=[args.dynamics_hidden_dims[-1]], output_dim=2),
         reward_activation=get_activation(args.reward_activation),
         weight_decays=args.dynamics_weight_decay,
         device=args.device
@@ -191,7 +192,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args), record_params=["uncertainty_mode", "ensemble_reward", "penalty_coef", "rollout_length"])
+    log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args), record_params=["uncertainty_mode", "reward_uncertainty_mode", "penalty_coef", "rollout_length"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -222,7 +223,7 @@ def train(args=get_args()):
     offline_data = real_buffer.sample_all()
     if not load_dynamics_model:
         dynamics.train(offline_data, rlhf_dataset, logger, max_epochs=50, max_epochs_since_update=None)
-    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'])
+    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'], uncertainty_mode=args.reward_uncertainty_mode)
     real_buffer.update_all_rewards(pred_rewards)
     logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
     logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))

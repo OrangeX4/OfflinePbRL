@@ -56,6 +56,8 @@ class EnsembleDynamicsModel(nn.Module):
                 self.reward_model = reward_model
             else:
                 self.reward_model = reward_model()
+        else:
+            self.reward_model = None
         self.reward_activation = reward_activation() if reward_activation is not None else None
 
         assert len(weight_decays) == (len(hidden_dims) + 1)

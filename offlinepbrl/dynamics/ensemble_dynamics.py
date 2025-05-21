@@ -27,7 +27,7 @@ class EnsembleDynamics(BaseDynamics):
         self._penalty_coef = penalty_coef
         self._default_ensemble_reward = default_ensemble_reward
         self._default_deterministic_reward = default_deterministic_reward
-        self._uncertainty_mode = uncertainty_mode
+        self._default_uncertainty_mode = uncertainty_mode
 
     @torch.no_grad()
     def step(
@@ -36,12 +36,15 @@ class EnsembleDynamics(BaseDynamics):
         action: np.ndarray,
         ensemble_reward: Optional[bool] = None,
         deterministic_reward: Optional[bool] = None,
+        uncertainty_mode: Optional[str] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict]:
         "imagine single forward step"
         if ensemble_reward is None:
             ensemble_reward = self._default_ensemble_reward
         if deterministic_reward is None:
             deterministic_reward = self._default_deterministic_reward
+        if uncertainty_mode is None:
+            uncertainty_mode = self._default_uncertainty_mode
 
         obs_act = np.concatenate([obs, action], axis=-1)
         obs_act = self.scaler.transform(obs_act)
@@ -71,18 +74,22 @@ class EnsembleDynamics(BaseDynamics):
         info["raw_reward"] = reward
 
         if self._penalty_coef:
-            if self._uncertainty_mode == "aleatoric":
+            if uncertainty_mode == "aleatoric":
                 penalty = np.amax(np.linalg.norm(std, axis=2), axis=0)
-            elif self._uncertainty_mode == "aleatoric-dynamics":
+            elif uncertainty_mode == "aleatoric-reward":
+                penalty = np.amax(np.linalg.norm(std[..., -1:], axis=2), axis=0)
+            elif uncertainty_mode == "aleatoric-dynamics":
                 penalty = np.amax(np.linalg.norm(std[..., :-1], axis=2), axis=0)
-            elif self._uncertainty_mode == "pairwise-diff":
+            elif uncertainty_mode == "pairwise-diff":
                 next_obses_mean = mean[..., :-1]
                 next_obs_mean = np.mean(next_obses_mean, axis=0)
                 diff = next_obses_mean - next_obs_mean
                 penalty = np.amax(np.linalg.norm(diff, axis=2), axis=0)
-            elif self._uncertainty_mode == "ensemble_std":
+            elif uncertainty_mode == "ensemble_std":
                 next_obses_mean = mean[..., :-1]
                 penalty = np.sqrt(next_obses_mean.var(0).mean(1))
+            elif uncertainty_mode == "null":
+                penalty = np.zeros_like(reward)
             else:
                 raise ValueError
             penalty = np.expand_dims(penalty, 1).astype(np.float32)
@@ -100,6 +107,7 @@ class EnsembleDynamics(BaseDynamics):
         batch_size: int = 4096,
         ensemble_reward: Optional[bool] = None,
         deterministic_reward: Optional[bool] = None,
+        uncertainty_mode: Optional[str] = None,
     ) -> np.ndarray:
         next_obss = np.zeros_like(obs)
         rewards = np.zeros((*obs.shape[:-1], 1), dtype=np.float32)
@@ -110,7 +118,7 @@ class EnsembleDynamics(BaseDynamics):
             end = min(start + batch_size, data_size)
             obs_batch = obs[start:end]
             action_batch = action[start:end]
-            next_obs_batch, reward_batch, terminal_batch, info_batch = self.step(obs_batch, action_batch, ensemble_reward, deterministic_reward)
+            next_obs_batch, reward_batch, terminal_batch, info_batch = self.step(obs_batch, action_batch, ensemble_reward, deterministic_reward, uncertainty_mode)
             next_obss[start:end] = next_obs_batch
             rewards[start:end] = reward_batch
             terminals[start:end] = terminal_batch
