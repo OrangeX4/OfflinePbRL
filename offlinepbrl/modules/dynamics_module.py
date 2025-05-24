@@ -37,7 +37,6 @@ class EnsembleDynamicsModel(nn.Module):
         num_ensemble: int = 7,
         num_elites: int = 5,
         activation: nn.Module = Swish,
-        reward_model: Optional[nn.Module] = None,
         reward_activation: Optional[nn.Module] = None,
         weight_decays: Optional[Union[List[float], Tuple[float]]] = None,
         with_reward: bool = True,
@@ -51,13 +50,6 @@ class EnsembleDynamicsModel(nn.Module):
         self.device = torch.device(device)
 
         self.activation = activation()
-        if reward_model is not None:
-            if isinstance(reward_model, nn.Module):
-                self.reward_model = reward_model
-            else:
-                self.reward_model = reward_model()
-        else:
-            self.reward_model = None
         self.reward_activation = reward_activation() if reward_activation is not None else None
 
         assert len(weight_decays) == (len(hidden_dims) + 1)
@@ -99,18 +91,10 @@ class EnsembleDynamicsModel(nn.Module):
         for layer in self.backbones:
             output = self.activation(layer(output))
         mean, logvar = torch.chunk(self.output_layer(output), 2, dim=-1)
-        if self.reward_model is not None or self.reward_activation is not None:
-            reward = mean[..., -1:]
-            reward_var = logvar[..., -1:]
-            if self.reward_model is not None:
-                reward_model_output = self.reward_model(output.detach())
-                reward = reward_model_output[..., :-1]
-                reward_var = reward_model_output[..., -1:]
-            if self.reward_activation is not None:
-                reward = self.reward_activation(reward)
-            mean = torch.cat([mean[..., :-1], reward], dim=-1)
-            logvar = torch.cat([logvar[..., :-1], reward_var], dim=-1)
         logvar = soft_clamp(logvar, self.min_logvar, self.max_logvar)
+        if self.reward_activation is not None:
+            reward = self.reward_activation(mean[..., -1])
+            mean = torch.cat([mean[..., :-1], reward.unsqueeze(-1)], dim=-1)
         return mean, logvar
 
     def load_save(self) -> None:
