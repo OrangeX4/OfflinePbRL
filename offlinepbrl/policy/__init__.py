@@ -6,6 +6,7 @@ from offlinepbrl.policy.model_free.sac import SACPolicy
 from offlinepbrl.policy.model_free.td3 import TD3Policy
 from offlinepbrl.policy.model_free.cql import CQLPolicy
 from offlinepbrl.policy.model_free.iql import IQLPolicy
+from offlinepbrl.policy.model_free.awac import AWACPolicy
 from offlinepbrl.policy.model_free.mcq import MCQPolicy
 from offlinepbrl.policy.model_free.td3bc import TD3BCPolicy
 from offlinepbrl.policy.model_free.edac import EDACPolicy
@@ -24,6 +25,7 @@ __all__ = [
     "TD3Policy",
     "CQLPolicy",
     "IQLPolicy",
+    "AWACPolicy",
     "MCQPolicy",
     "TD3BCPolicy",
     "EDACPolicy",
