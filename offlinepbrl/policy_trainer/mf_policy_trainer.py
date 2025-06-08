@@ -8,7 +8,7 @@ import gym
 from typing import Optional, Dict, List
 from tqdm import tqdm
 from collections import deque
-from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger
 from offlinepbrl.policy import BasePolicy
 
@@ -25,12 +25,16 @@ class MFPolicyTrainer:
         step_per_epoch: int = 1000,
         batch_size: int = 256,
         eval_episodes: int = 10,
-        lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
+        lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
+        pref_buffer: Optional[PrefBuffer] = None,
+        pref_batch_size: Optional[int] = None,
     ) -> None:
         self.policy = policy
         self.eval_env = eval_env
         self.buffer = buffer
         self.logger = logger
+        self.pref_buffer = pref_buffer
+        self.pref_batch_size = pref_batch_size if pref_batch_size is not None else batch_size
 
         self._epoch = epoch
         self._step_per_epoch = step_per_epoch
@@ -50,7 +54,17 @@ class MFPolicyTrainer:
 
             pbar = tqdm(range(self._step_per_epoch), desc=f"Epoch #{e}/{self._epoch}")
             for it in pbar:
-                batch = self.buffer.sample(self._batch_size)
+                # Sample from both buffers if preference buffer is available
+                if self.pref_buffer is not None:
+                    replay_batch = self.buffer.sample(self._batch_size)
+                    preference_batch = self.pref_buffer.sample(self.pref_batch_size)
+                    batch = {
+                        "replay": replay_batch,
+                        "pref": preference_batch,
+                    }
+                else:
+                    batch = self.buffer.sample(self._batch_size)
+                
                 loss = self.policy.learn(batch)
                 pbar.set_postfix(**loss)
 

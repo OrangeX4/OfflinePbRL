@@ -10,7 +10,7 @@ from offlinepbrl.policy import BasePolicy
 
 class AWACPolicy(BasePolicy):
     """
-    Advantage Weighted Actor Critic <Ref: https://arxiv.org/abs/2110.06169>
+    Advantage Weighted Actor Critic <Ref: https://arxiv.org/abs/2006.09359>
     """
 
     def __init__(
