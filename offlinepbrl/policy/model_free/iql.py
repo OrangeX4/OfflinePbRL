@@ -135,5 +135,8 @@ class IQLPolicy(BasePolicy):
             "loss/actor": actor_loss.item(),
             "loss/q1": critic_q1_loss.item(),
             "loss/q2": critic_q2_loss.item(),
-            "loss/v": critic_v_loss.item()
+            "loss/v": critic_v_loss.item(),
+            "misc/q1": q1.mean().item(),
+            "misc/q2": q2.mean().item(),
+            "misc/next_v": next_v.mean().item(),
         }

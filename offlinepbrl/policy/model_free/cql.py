@@ -194,7 +194,10 @@ class CQLPolicy(SACPolicy):
         result =  {
             "loss/actor": actor_loss.item(),
             "loss/critic1": critic1_loss.item(),
-            "loss/critic2": critic2_loss.item()
+            "loss/critic2": critic2_loss.item(),
+            "misc/q1": q1.mean().item(),
+            "misc/q2": q2.mean().item(),
+            "misc/next_q": next_q.mean().item(),
         }
 
         if self._is_auto_alpha:

@@ -123,5 +123,8 @@ class AWACPolicy(BasePolicy):
             "loss/actor": actor_loss.item(),
             "loss/q1": critic_q1_loss.item(),
             "loss/q2": critic_q2_loss.item(),
-            "misc/advantage": advantage.mean().item()
+            "misc/advantage": advantage.mean().item(),
+            "misc/q1": q1.mean().item(),
+            "misc/q2": q2.mean().item(),
+            "misc/next_q": next_q.mean().item(),
         }
