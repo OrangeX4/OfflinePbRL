@@ -19,6 +19,7 @@ from offlinepbrl.policy.model_based.combo import COMBOPolicy
 
 # preference only
 from offlinepbrl.policy.model_free.ipl_iql import IPLIQLPolicy
+from offlinepbrl.policy.model_free.ipl_awac import IPLAWACPolicy
 
 __all__ = [
     "BasePolicy",
