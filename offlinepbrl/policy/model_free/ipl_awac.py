@@ -122,6 +122,7 @@ class IPLAWACPolicy(AWACPolicy):
         reward1 = q1_pred - (1 - terminal) * self._gamma * next_q
         reward2 = q2_pred - (1 - terminal) * self._gamma * next_q
         # Stack along first dimension to create ensemble-like structure
+        # TODO: use ensemble reward will result explosion for ipl awac
         reward = torch.stack([reward1, reward2], dim=0)  # Shape: [2, total_size, 1]
         reward = reward.squeeze(-1)  # Shape: [2, total_size]
         
@@ -162,7 +163,10 @@ class IPLAWACPolicy(AWACPolicy):
             "loss/reg": reg_loss.item(),
             "misc/reward_value": reward.mean().item(),
             "misc/reward_acc": reward_accuracy.item(),
-            "misc/advantage": advantage.mean().item()
+            "misc/advantage": advantage.mean().item(),
+            "misc/q1": q1_pred.mean().item(),
+            "misc/q2": q2_pred.mean().item(),
+            "misc/next_q": next_q.mean().item(),
         }
         
         if self.actor_replay_weight is not None:

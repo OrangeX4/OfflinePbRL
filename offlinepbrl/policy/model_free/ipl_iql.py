@@ -110,10 +110,15 @@ class IPLIQLPolicy(IQLPolicy):
         dist = self.actor(obs)
         log_probs = dist.log_prob(action)
         actor_loss = -(exp_a * log_probs)
-        a1, a2, ar = torch.split(actor_loss, split, dim=0)
-        actor_loss_fb = (a1.mean() + a2.mean()) / 2
-        actor_loss_re = ar.mean()
-        actor_loss = (1 - self.actor_replay_weight) * actor_loss_fb + self.actor_replay_weight * actor_loss_re
+        
+        if self.actor_replay_weight is not None:
+            a1, a2, ar = torch.split(actor_loss, split, dim=0)
+            actor_loss_fb = (a1.mean() + a2.mean()) / 2
+            actor_loss_re = ar.mean()
+            actor_loss = (1 - self.actor_replay_weight) * actor_loss_fb + self.actor_replay_weight * actor_loss_re
+        else:
+            actor_loss = actor_loss.mean()
+            
         self.actor_optim.zero_grad()
         actor_loss.backward()
         self.actor_optim.step()
@@ -143,7 +148,10 @@ class IPLIQLPolicy(IQLPolicy):
         # Regularization loss
         reg_loss_fb = (r1.square().mean() + r2.square().mean()) / 2
         reg_loss_re = rr.square().mean()
-        reg_loss = (1 - self.reg_replay_weight) * reg_loss_fb + self.reg_replay_weight * reg_loss_re
+        if self.reg_replay_weight is not None:
+            reg_loss = (1 - self.reg_replay_weight) * reg_loss_fb + self.reg_replay_weight * reg_loss_re
+        else:
+            reg_loss = reward.square().mean()
         
         critic_loss = pref_loss + self.reward_reg * reg_loss
         
@@ -164,7 +172,10 @@ class IPLIQLPolicy(IQLPolicy):
             "loss/v": v_loss.item(),
             "loss/reg": reg_loss.item(),
             "misc/reward_value": reward.mean().item(),
-            "misc/reward_acc": reward_accuracy.item()
+            "misc/reward_acc": reward_accuracy.item(),
+            "misc/q1": q1_pred.mean().item(),
+            "misc/q2": q2_pred.mean().item(),
+            "misc/next_v": next_v.mean().item(),
         }
         
         if self.actor_replay_weight is not None:
