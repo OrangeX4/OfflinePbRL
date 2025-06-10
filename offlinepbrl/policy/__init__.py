@@ -21,6 +21,7 @@ from offlinepbrl.policy.model_based.combo import COMBOPolicy
 from offlinepbrl.policy.model_free.ipl_iql import IPLIQLPolicy
 from offlinepbrl.policy.model_free.ipl_awac import IPLAWACPolicy
 from offlinepbrl.policy.model_free.ipl_cql import IPLCQLPolicy
+from offlinepbrl.policy.model_free.cprl import CPRLPolicy
 
 __all__ = [
     "BasePolicy",
@@ -40,4 +41,5 @@ __all__ = [
     "IPLIQLPolicy",
     "IPLAWACPolicy",
     "IPLCQLPolicy",
+    "CPRLPolicy",
 ]
