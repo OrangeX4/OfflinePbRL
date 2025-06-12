@@ -85,7 +85,7 @@ class SACPolicy(BasePolicy):
             action, _ = self.actforward(obs, deterministic)
         return action.cpu().numpy()
 
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
 

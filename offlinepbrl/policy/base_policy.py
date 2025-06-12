@@ -22,5 +22,5 @@ class BasePolicy(nn.Module):
     ) -> np.ndarray:
         raise NotImplementedError
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         raise NotImplementedError

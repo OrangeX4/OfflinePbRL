@@ -65,7 +65,7 @@ class MFPolicyTrainer:
                 else:
                     batch = self.buffer.sample(self._batch_size)
                 
-                loss = self.policy.learn(batch)
+                loss = self.policy.learn(batch, epoch=e, step=it)
                 pbar.set_postfix(**loss)
 
                 for k, v in loss.items():

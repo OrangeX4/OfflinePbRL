@@ -46,7 +46,7 @@ class IPLAWACPolicy(AWACPolicy):
         self.actor_replay_weight = actor_replay_weight
         self.reward_criterion = torch.nn.BCEWithLogitsLoss(reduction="none")
 
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         replay_batch, pref_batch = batch["replay"], batch["pref"]
 
         F_B, F_S = pref_batch["obs_1"].shape[0:2]

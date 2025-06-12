@@ -121,7 +121,7 @@ class CPRLPolicy(SACPolicy):
 
         return q1 - log_prob1, q2 - log_prob2
 
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         replay_batch, pref_batch = batch["replay"], batch["pref"]
         
         # Extract preference data

@@ -107,7 +107,7 @@ class COMBOPolicy(CQLPolicy):
         return rollout_transitions, \
             {"num_transitions": num_transitions, "reward_mean": rewards_arr.mean()}
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         real_batch, fake_batch = batch["real"], batch["fake"]
         mix_batch = {k: torch.cat([real_batch[k], fake_batch[k]], 0) for k in real_batch.keys()}
 

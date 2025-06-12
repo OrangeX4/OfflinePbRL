@@ -30,7 +30,7 @@ class BCPolicy(BasePolicy):
             action = self.actor(obs).cpu().numpy()
         return action
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions = batch["observations"], batch["actions"]
         
         a = self.actor(obss)

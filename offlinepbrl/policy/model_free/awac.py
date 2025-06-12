@@ -71,7 +71,7 @@ class AWACPolicy(BasePolicy):
         action = np.clip(action, self.action_space.low[0], self.action_space.high[0])
         return action
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
         

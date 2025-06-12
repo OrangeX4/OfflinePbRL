@@ -84,7 +84,7 @@ class CQLPolicy(SACPolicy):
 
         return q1 - log_prob1, q2 - log_prob2
 
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
         batch_size = obss.shape[0]

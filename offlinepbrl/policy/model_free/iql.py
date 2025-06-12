@@ -83,7 +83,7 @@ class IQLPolicy(BasePolicy):
         weight = torch.where(diff > 0, self._expectile, (1 - self._expectile))
         return weight * (diff**2)
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
         

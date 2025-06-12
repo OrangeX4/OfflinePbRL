@@ -80,7 +80,7 @@ class TD3BCPolicy(TD3Policy):
             action = np.clip(action, -self._max_action, self._max_action)
         return action
     
-    def learn(self, batch: Dict) -> Dict[str, float]:
+    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
         

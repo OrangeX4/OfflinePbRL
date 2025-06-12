@@ -76,7 +76,7 @@ class MBPolicyTrainer:
                 real_batch = self.real_buffer.sample(batch_size=real_sample_size)
                 fake_batch = self.fake_buffer.sample(batch_size=fake_sample_size)
                 batch = {"real": real_batch, "fake": fake_batch}
-                loss = self.policy.learn(batch)
+                loss = self.policy.learn(batch, epoch=e, step=it)
                 pbar.set_postfix(**loss)
 
                 for k, v in loss.items():

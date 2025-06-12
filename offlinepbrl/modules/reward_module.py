@@ -3,10 +3,31 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from typing import Union, Optional
+from abc import ABC, abstractmethod
 from offlinepbrl.nets.activation import get_activation
 
 
-class RewardModel(nn.Module):
+class BaseRewardModel(nn.Module, ABC):
+    """Abstract base class for reward models"""
+    
+    @abstractmethod
+    def forward(
+        self,
+        obs: Union[np.ndarray, torch.Tensor],
+        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
+    ) -> torch.Tensor:
+        pass
+    
+    @abstractmethod
+    def select_reward(
+        self,
+        obs: Union[np.ndarray, torch.Tensor],
+        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
+    ) -> torch.Tensor:
+        pass
+
+
+class RewardModel(BaseRewardModel):
     def __init__(
         self, 
         backbone: nn.Module, 
@@ -26,7 +47,7 @@ class RewardModel(nn.Module):
     def forward(
         self,
         obs: Union[np.ndarray, torch.Tensor],
-        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
+        actions: Optional[Union[np.ndarray, torch.Tensor]] = None,
     ) -> torch.Tensor:
         obs = torch.as_tensor(obs, device=self.device, dtype=torch.float32)
         if actions is not None:
@@ -36,3 +57,11 @@ class RewardModel(nn.Module):
         rewards = self.last(logits)
         rewards = self.activation(rewards)
         return rewards
+
+    def select_reward(
+        self,
+        obs: Union[np.ndarray, torch.Tensor],
+        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
+    ) -> torch.Tensor:
+        """Select reward using the reward model"""
+        return self.forward(obs, actions)
