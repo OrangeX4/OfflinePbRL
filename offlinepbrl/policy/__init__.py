@@ -22,6 +22,7 @@ from offlinepbrl.policy.preference.ipl_iql import IPLIQLPolicy
 from offlinepbrl.policy.preference.ipl_awac import IPLAWACPolicy
 from offlinepbrl.policy.preference.ipl_cql import IPLCQLPolicy
 from offlinepbrl.policy.preference.cprl import CPRLPolicy
+from offlinepbrl.policy.preference.bcl import BCLPolicy
 
 __all__ = [
     "BasePolicy",
@@ -42,4 +43,5 @@ __all__ = [
     "IPLAWACPolicy",
     "IPLCQLPolicy",
     "CPRLPolicy",
+    "BCLPolicy"
 ]

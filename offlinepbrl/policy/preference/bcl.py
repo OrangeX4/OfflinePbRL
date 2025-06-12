@@ -8,9 +8,9 @@ from typing import Dict, Union, Tuple
 from offlinepbrl.policy import SACPolicy
 
 
-class CPRLPolicy(SACPolicy):
+class BCLPolicy(SACPolicy):
     """
-    Conservative Preference Reward Learning
+    Bidirectional Conservative Learning
     """
 
     def __init__(
@@ -35,7 +35,9 @@ class CPRLPolicy(SACPolicy):
         lagrange_threshold: float = 10.0,
         cql_alpha_lr: float = 1e-4,
         num_repeart_actions:int = 10,
-        reward_reg: float = 0.0,
+        reward_reg: float = 0.5,
+        reward_sync_weight: float = 1.0,
+        reward_sync_start_epoch: int = 50,
     ) -> None:
         super().__init__(
             actor,
@@ -65,36 +67,8 @@ class CPRLPolicy(SACPolicy):
         self._num_repeat_actions = num_repeart_actions
         self.reward_criterion = torch.nn.BCEWithLogitsLoss(reduction="none")
         self.reward_reg = reward_reg
-
-    def calc_reward_values(
-        self,
-        obs_pi: torch.Tensor,
-        obs_to_pred: torch.Tensor,
-        next_obs: torch.Tensor
-    ) -> torch.Tensor:
-        act, log_prob = self.actforward(obs_pi)
-        reward = self.reward_model(obs_to_pred, act)
-        with torch.no_grad():
-            next_v = torch.min(
-                self.critic1_old(next_obs, act),
-                self.critic2_old(next_obs, act)
-            )
-        return reward + self._gamma * next_v - log_prob.detach()
-
-    def calc_random_reward_values(
-        self,
-        obs: torch.Tensor,
-        random_act: torch.Tensor,
-        next_obs: torch.Tensor
-    ) -> torch.Tensor:
-        reward = self.reward_model(obs, random_act)
-        with torch.no_grad():
-            next_v = torch.min(
-                self.critic1_old(next_obs, random_act),
-                self.critic2_old(next_obs, random_act)
-            )
-        log_prob = np.log(0.5**random_act.shape[-1])
-        return reward + self._gamma * next_v - log_prob
+        self.reward_sync_weight = reward_sync_weight
+        self.reward_sync_start_epoch = reward_sync_start_epoch
 
     def calc_pi_values(
         self,
@@ -133,19 +107,7 @@ class CPRLPolicy(SACPolicy):
             replay_batch["next_observations"], replay_batch["terminals"]
         batch_size = obss.shape[0]
         
-        # compute conservative loss for reward model training
-        random_actions = torch.FloatTensor(
-            batch_size * self._num_repeat_actions, actions.shape[-1]
-        ).uniform_(self.action_space.low[0], self.action_space.high[0]).to(self.actor.device)
-        
-        tmp_obss = obss.unsqueeze(1) \
-            .repeat(1, self._num_repeat_actions, 1) \
-            .view(batch_size * self._num_repeat_actions, obss.shape[-1])
-        tmp_next_obss = next_obss.unsqueeze(1) \
-            .repeat(1, self._num_repeat_actions, 1) \
-            .view(batch_size * self._num_repeat_actions, next_obss.shape[-1])
-        
-        # update actor - only on original observations
+        # update actor
         a, log_probs = self.actforward(obss)
         q1a, q2a = self.critic1(obss, a), self.critic2(obss, a)
         actor_loss = (self._alpha * log_probs - torch.min(q1a, q2a)).mean()
@@ -161,17 +123,17 @@ class CPRLPolicy(SACPolicy):
             self.alpha_optim.step()
             self._alpha = self._log_alpha.detach().exp()
         
-        # compute td error for critic update
+        # compute td error
         if self._max_q_backup:
             with torch.no_grad():
-                tmp_next_obss_backup = next_obss.unsqueeze(1) \
+                tmp_next_obss = next_obss.unsqueeze(1) \
                     .repeat(1, self._num_repeat_actions, 1) \
                     .view(batch_size * self._num_repeat_actions, next_obss.shape[-1])
-                tmp_next_actions, _ = self.actforward(tmp_next_obss_backup)
-                tmp_next_q1 = self.critic1_old(tmp_next_obss_backup, tmp_next_actions) \
+                tmp_next_actions, _ = self.actforward(tmp_next_obss)
+                tmp_next_q1 = self.critic1_old(tmp_next_obss, tmp_next_actions) \
                     .view(batch_size, self._num_repeat_actions, 1) \
                     .max(1)[0].view(-1, 1)
-                tmp_next_q2 = self.critic2_old(tmp_next_obss_backup, tmp_next_actions) \
+                tmp_next_q2 = self.critic2_old(tmp_next_obss, tmp_next_actions) \
                     .view(batch_size, self._num_repeat_actions, 1) \
                     .max(1)[0].view(-1, 1)
                 next_q = torch.min(tmp_next_q1, tmp_next_q2)
@@ -188,55 +150,21 @@ class CPRLPolicy(SACPolicy):
         with torch.no_grad():
             replay_rewards = self.reward_model(obss, actions)
         target_q = replay_rewards + self._gamma * (1 - terminals) * next_q
-        
-        # Conservative loss for reward model - using Q = reward + gamma * V
-        obs_reward_value = self.calc_reward_values(tmp_obss, tmp_obss, tmp_next_obss)
-        next_obs_reward_value = self.calc_reward_values(tmp_next_obss, tmp_obss, tmp_next_obss)
-        random_reward_value = self.calc_random_reward_values(tmp_obss, random_actions, tmp_next_obss)
+        q1, q2 = self.critic1(obss, actions), self.critic2(obss, actions)
+        critic1_loss = ((q1 - target_q).pow(2)).mean()
+        critic2_loss = ((q2 - target_q).pow(2)).mean()
 
-        obs_reward_value = obs_reward_value.reshape(batch_size, self._num_repeat_actions, 1)
-        next_obs_reward_value = next_obs_reward_value.reshape(batch_size, self._num_repeat_actions, 1)
-        random_reward_value = random_reward_value.reshape(batch_size, self._num_repeat_actions, 1)
-        
-        cat_q_pred = torch.cat([obs_reward_value, next_obs_reward_value, random_reward_value], 1)
-        q_pred = self.reward_model(obss, actions) + self._gamma * (1 - terminals) * next_q.detach()
-
-        reward_conservative_loss = \
-            torch.logsumexp(cat_q_pred / self._temperature, dim=1).mean() * self._cql_weight * self._temperature - \
-            q_pred.mean() * self._cql_weight
-        
-        # Preference learning
-        pref_obs_1 = pref_batch["obs_1"][:, :-1].reshape(F_B*F_S, -1)
-        pref_obs_2 = pref_batch["obs_2"][:, :-1].reshape(F_B*F_S, -1)
-        pref_action_1 = pref_batch["action_1"][:, :-1].reshape(F_B*F_S, -1)
-        pref_action_2 = pref_batch["action_2"][:, :-1].reshape(F_B*F_S, -1)
-        
-        reward_1 = self.reward_model(pref_obs_1, pref_action_1).reshape(F_B, F_S)
-        reward_2 = self.reward_model(pref_obs_2, pref_action_2).reshape(F_B, F_S)
-        
-        logits = reward_2.sum(dim=-1) - reward_1.sum(dim=-1)
-        labels = pref_batch["label"][:, 1].float()
-        pref_loss = self.reward_criterion(logits, labels).mean()
-        
-        # Regularization loss
-        reg_loss = (reward_1.square().mean() + reward_2.square().mean()) / 2
-        
-        # Total reward model loss
-        reward_model_loss = pref_loss + self.reward_reg * reg_loss + reward_conservative_loss
-        
-        if self._with_lagrange:
-            cql_alpha = torch.clamp(self.cql_log_alpha.exp(), 0.0, 1e6)
-            reward_conservative_loss_scaled = cql_alpha * (reward_conservative_loss - self._lagrange_threshold)
-            reward_model_loss = pref_loss + self.reward_reg * reg_loss + reward_conservative_loss_scaled
-
-            self.cql_alpha_optim.zero_grad()
-            cql_alpha_loss = -reward_conservative_loss_scaled
-            cql_alpha_loss.backward(retain_graph=True)
-            self.cql_alpha_optim.step()
-        
-        self.reward_model_optim.zero_grad()
-        reward_model_loss.backward()
-        self.reward_model_optim.step()
+        # compute conservative loss
+        random_actions = torch.FloatTensor(
+            batch_size * self._num_repeat_actions, actions.shape[-1]
+        ).uniform_(self.action_space.low[0], self.action_space.high[0]).to(self.actor.device)
+        # tmp_obss & tmp_next_obss: (batch_size * num_repeat, obs_dim)
+        tmp_obss = obss.unsqueeze(1) \
+            .repeat(1, self._num_repeat_actions, 1) \
+            .view(batch_size * self._num_repeat_actions, obss.shape[-1])
+        tmp_next_obss = next_obss.unsqueeze(1) \
+            .repeat(1, self._num_repeat_actions, 1) \
+            .view(batch_size * self._num_repeat_actions, next_obss.shape[-1])
 
         # CQL-style conservative loss for Q networks
         obs_pi_value1, obs_pi_value2 = self.calc_pi_values(tmp_obss, tmp_obss)
@@ -254,11 +182,6 @@ class CPRLPolicy(SACPolicy):
         cat_q1 = torch.cat([obs_pi_value1, next_obs_pi_value1, random_value1], 1)
         cat_q2 = torch.cat([obs_pi_value2, next_obs_pi_value2, random_value2], 1)
 
-        # Update critics - only on original data with conservative loss
-        q1, q2 = self.critic1(obss, actions), self.critic2(obss, actions)
-        critic1_loss = ((q1 - target_q).pow(2)).mean()
-        critic2_loss = ((q2 - target_q).pow(2)).mean()
-
         # Add CQL conservative loss to critics
         conservative_loss1 = \
             torch.logsumexp(cat_q1 / self._temperature, dim=1).mean() * self._cql_weight * self._temperature - \
@@ -266,6 +189,16 @@ class CPRLPolicy(SACPolicy):
         conservative_loss2 = \
             torch.logsumexp(cat_q2 / self._temperature, dim=1).mean() * self._cql_weight * self._temperature - \
             q2.mean() * self._cql_weight
+        
+        if self._with_lagrange:
+            cql_alpha = torch.clamp(self.cql_log_alpha.exp(), 0.0, 1e6)
+            conservative_loss1_scaled = cql_alpha * (conservative_loss1 - self._lagrange_threshold)
+            conservative_loss2_scaled = cql_alpha * (conservative_loss2 - self._lagrange_threshold)
+
+            self.cql_alpha_optim.zero_grad()
+            cql_alpha_loss = -(conservative_loss1_scaled + conservative_loss2_scaled) * 0.5
+            cql_alpha_loss.backward(retain_graph=True)
+            self.cql_alpha_optim.step()
         
         critic1_loss = critic1_loss + conservative_loss1
         critic2_loss = critic2_loss + conservative_loss2
@@ -281,6 +214,95 @@ class CPRLPolicy(SACPolicy):
 
         self._sync_weight()
 
+        # Reward model training with bidirectional learning
+        # 1. Preference learning (BT model)
+        pref_obs_1 = pref_batch["obs_1"][:, :-1].reshape(F_B*F_S, -1)
+        pref_obs_2 = pref_batch["obs_2"][:, :-1].reshape(F_B*F_S, -1)
+        pref_action_1 = pref_batch["action_1"][:, :-1].reshape(F_B*F_S, -1)
+        pref_action_2 = pref_batch["action_2"][:, :-1].reshape(F_B*F_S, -1)
+        
+        reward_1 = self.reward_model(pref_obs_1, pref_action_1).reshape(F_B, F_S)
+        reward_2 = self.reward_model(pref_obs_2, pref_action_2).reshape(F_B, F_S)
+        
+        logits = reward_2.sum(dim=-1) - reward_1.sum(dim=-1)
+        labels = pref_batch["label"][:, 1].float()
+        pref_loss = self.reward_criterion(logits, labels).mean()
+        
+        # 2. Reward synchronization: r ≈ Q - γV (Soft Bellman Operator)
+        # Apply to original replay data and sampled data from CQL
+        with torch.no_grad():
+            # For original replay data
+            current_q1 = self.critic1(obss, actions)
+            current_q2 = self.critic2(obss, actions)
+            current_q = torch.min(current_q1, current_q2)
+            
+            # Target reward from Soft Bellman: r = Q - γV_next
+            target_reward_orig = current_q - self._gamma * (1 - terminals) * next_q
+            
+            # For sampled data from CQL conservative loss computation
+            sampled_obs_actions, _ = self.actforward(tmp_obss)
+            sampled_next_obs_actions, _ = self.actforward(tmp_next_obss)
+            
+            # Q values for sampled actions
+            q1_sampled_obs = self.critic1(tmp_obss, sampled_obs_actions)
+            q2_sampled_obs = self.critic2(tmp_obss, sampled_obs_actions)
+            q_sampled_obs = torch.min(q1_sampled_obs, q2_sampled_obs)
+            
+            q1_sampled_next = self.critic1(tmp_obss, sampled_next_obs_actions)  # Use tmp_obss as current state
+            q2_sampled_next = self.critic2(tmp_obss, sampled_next_obs_actions)
+            q_sampled_next = torch.min(q1_sampled_next, q2_sampled_next)
+            
+            q1_random = self.critic1(tmp_obss, random_actions)
+            q2_random = self.critic2(tmp_obss, random_actions)
+            q_random = torch.min(q1_random, q2_random)
+            
+            # V values for next states (all using tmp_next_obss as next state)
+            next_v_sampled_obs = torch.min(
+                self.critic1_old(tmp_next_obss, sampled_obs_actions),
+                self.critic2_old(tmp_next_obss, sampled_obs_actions)
+            )
+            next_v_sampled_next = torch.min(
+                self.critic1_old(tmp_next_obss, sampled_next_obs_actions),
+                self.critic2_old(tmp_next_obss, sampled_next_obs_actions)
+            )
+            next_v_random = torch.min(
+                self.critic1_old(tmp_next_obss, random_actions),
+                self.critic2_old(tmp_next_obss, random_actions)
+            )
+            
+            # Target rewards for sampled data (assume non-terminal for sampled data)
+            target_reward_sampled_obs = q_sampled_obs - self._gamma * next_v_sampled_obs
+            target_reward_sampled_next = q_sampled_next - self._gamma * next_v_sampled_next
+            target_reward_random = q_random - self._gamma * next_v_random
+        
+        # Predicted rewards from reward model
+        pred_reward_orig = self.reward_model(obss, actions)
+        pred_reward_sampled_obs = self.reward_model(tmp_obss, sampled_obs_actions)
+        pred_reward_sampled_next = self.reward_model(tmp_obss, sampled_next_obs_actions)
+        pred_reward_random = self.reward_model(tmp_obss, random_actions)
+        
+        # Reward synchronization loss on all data points
+        reward_sync_loss = (
+            ((pred_reward_orig - target_reward_orig).pow(2)).mean() +
+            ((pred_reward_sampled_obs - target_reward_sampled_obs).pow(2)).mean() +
+            ((pred_reward_sampled_next - target_reward_sampled_next).pow(2)).mean() +
+            ((pred_reward_random - target_reward_random).pow(2)).mean()
+        ) / 4
+        
+        # 3. Regularization loss
+        reg_loss = (reward_1.square().mean() + reward_2.square().mean()) / 2
+        
+        if epoch is not None and epoch >= self.reward_sync_start_epoch:
+            reward_sync_weight = self.reward_sync_weight
+        else:
+            reward_sync_weight = 0.0
+        # Total reward model loss
+        reward_model_loss = pref_loss + self.reward_reg * reg_loss + reward_sync_weight * reward_sync_loss
+        
+        self.reward_model_optim.zero_grad()
+        reward_model_loss.backward()
+        self.reward_model_optim.step()
+
         with torch.no_grad():
             reward_accuracy = ((logits > 0) == torch.round(labels)).float().mean()
             # Compute reward statistics
@@ -293,7 +315,7 @@ class CPRLPolicy(SACPolicy):
             "loss/critic1": critic1_loss.item(),
             "loss/critic2": critic2_loss.item(),
             "loss/preference": pref_loss.item(),
-            "loss/reward_conservative": reward_conservative_loss.item(),
+            "loss/reward_sync": reward_sync_loss.item(),
             "loss/q_conservative1": conservative_loss1.item(),
             "loss/q_conservative2": conservative_loss2.item(),
             "loss/reward_model": reward_model_loss.item(),
@@ -303,6 +325,8 @@ class CPRLPolicy(SACPolicy):
             "misc/q2": q2.mean().item(),
             "misc/next_q": next_q.mean().item(),
             "misc/replay_rewards": replay_rewards.mean().item(),
+            "misc/target_reward": target_reward_orig.mean().item(),
+            "misc/pred_reward": pred_reward_orig.mean().item(),
             "info/reward_mean": rewards_all.mean().item(),
             "info/reward_std": rewards_all.std().item(),
             "info/reward_win_mean": rewards_win.mean().item(),

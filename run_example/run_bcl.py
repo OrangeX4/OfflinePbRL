@@ -14,17 +14,17 @@ from offlinepbrl.utils.load_dataset import load_rlhf_dataset, qlearning_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import CPRLPolicy
+from offlinepbrl.policy import BCLPolicy
 
 """
-Conservative Preference Reward Learning (CPRL)
-Combines CQL with preference-based reward learning
+Bidirectional Conservative Learning (BCL)
+Combines CQL with bidirectional reward learning through Soft Bellman Operator
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="cprl_r")
+    parser.add_argument("--algo-name", type=str, default="bcl")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max-q-backup", type=bool, default=False)
     parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--with-lagrange", type=bool, default=False)
+    parser.add_argument("--with-lagrange", type=bool, default=True)
     parser.add_argument("--lagrange-threshold", type=float, default=10.0)
     parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
     parser.add_argument("--num-repeat-actions", type=int, default=10)
@@ -51,6 +51,7 @@ def get_args():
     # Reward model specific parameters
     parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
     parser.add_argument("--reward-reg", type=float, default=0.0)
+    parser.add_argument("--reward-sync-weight", type=float, default=1.0)
     
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step-per-epoch", type=int, default=1000)
@@ -119,8 +120,8 @@ def train(args=get_args()):
     else:
         alpha = args.alpha
 
-    # create CPRL policy
-    policy = CPRLPolicy(
+    # create BCL policy
+    policy = BCLPolicy(
         actor,
         critic1,
         critic2,
@@ -141,7 +142,8 @@ def train(args=get_args()):
         lagrange_threshold=args.lagrange_threshold,
         cql_alpha_lr=args.cql_alpha_lr,
         num_repeart_actions=args.num_repeat_actions,
-        reward_reg=args.reward_reg
+        reward_reg=args.reward_reg,
+        reward_sync_weight=args.reward_sync_weight
     )
 
     # create replay buffer
