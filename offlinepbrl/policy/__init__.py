@@ -18,10 +18,10 @@ from offlinepbrl.policy.model_based.rambo import RAMBOPolicy
 from offlinepbrl.policy.model_based.combo import COMBOPolicy
 
 # preference only
-from offlinepbrl.policy.model_free.ipl_iql import IPLIQLPolicy
-from offlinepbrl.policy.model_free.ipl_awac import IPLAWACPolicy
-from offlinepbrl.policy.model_free.ipl_cql import IPLCQLPolicy
-from offlinepbrl.policy.model_free.cprl import CPRLPolicy
+from offlinepbrl.policy.preference.ipl_iql import IPLIQLPolicy
+from offlinepbrl.policy.preference.ipl_awac import IPLAWACPolicy
+from offlinepbrl.policy.preference.ipl_cql import IPLCQLPolicy
+from offlinepbrl.policy.preference.cprl import CPRLPolicy
 
 __all__ = [
     "BasePolicy",

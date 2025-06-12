@@ -43,7 +43,7 @@ def get_args():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max-q-backup", type=bool, default=False)
     parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--with-lagrange", type=bool, default=True)
+    parser.add_argument("--with-lagrange", type=bool, default=False)
     parser.add_argument("--lagrange-threshold", type=float, default=10.0)
     parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
     parser.add_argument("--num-repeat-actions", type=int, default=10)
