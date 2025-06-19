@@ -1,20 +1,11 @@
-<div align="center">
-  <img width="500px" height="auto" src="assets/logo.png">
-</div>
-
----
 
 # OfflinePbRL: An elegant PyTorch offline reinforcement learning library.
 
 ![MIT](https://img.shields.io/badge/license-MIT-blue)
 
-OfflinePbRL is an offline reinforcement learning library based on pure PyTorch. This library has some features which are friendly and convenient for researchers, including:
+OfflinePbRL is an offline preference reinforcement learning library based on pure PyTorch.
 
-- Elegant framework, the code structure is very clear and easy to use
-- State-of-the-art offline RL algorithms, including model-free and model-based approaches
-- High scalability, you can build your new algorithm with few lines of code based on the components in our library
-- Support parallel tuning, very convenient for researchers
-- Clear and powerful log system, easy to manage experiments
+It is built on the data from [Clean-Offline-RLHF](https://github.com/pickxiguapi/Clean-Offline-RLHF) and the code from [OfflineRL-Kit](https://github.com/yihaosun1124/OfflineRL-Kit), with the addition of algorithms related to offline preference reinforcement learning. Some code is also inspired by [WiseRL](https://github.com/typoverflow/WiseRL).
 
 ## Supported algorithms
 - Model-free
@@ -28,6 +19,9 @@ OfflinePbRL is an offline reinforcement learning library based on pure PyTorch. 
     - [Conservative Offline Model-Based Policy Optimization (COMBO)](https://arxiv.org/abs/2102.08363)
     - [Robust Adversarial Model-Based Offline Reinforcement Learning (RAMBO)](https://arxiv.org/abs/2204.12581)
     - [Model-Bellman Inconsistancy Penalized Offline Reinforcement Learning (MOBILE)](https://proceedings.mlr.press/v202/sun23q.html)
+- Preference-based
+    - BT model
+    - [Inverse Preference Learning (IPL)](https://arxiv.org/abs/2305.15363)
 
 ## Benchmark Results (4 seeds) (Ongoing)
 
@@ -43,7 +37,6 @@ OfflinePbRL is an offline reinforcement learning library based on pure PyTorch. 
 | hopper-medium-expert-v2      | 111.4±0.5 | 91.4±11.3 | 110.5±0.3 | 106.2±5.6 | 74.6±44.2 | 85.0±30.7 | 108.8±2.6 | 112.5±0.2  |
 | walker2d-medium-expert-v2    | 109.8±0.5 | 110.2±0.3 | 113.6±0.3 | 108.3±2.6 | 108.2±4.3 | 78.4±45.4 | 110.0±0.2 | 114.5±2.2  |
 
-Detailed logs can be viewed in <https://drive.google.com/drive/folders/11QHHDlLmUEc097tPgYvb4gZ2IaqSpkHp?usp=share_link>.
 
 ## Installation
 First, install MuJuCo engine, which can be download from [here](https://mujoco.org/download), and install `mujoco-py` (its version depends on the version of MuJoCo engine you have installed).
