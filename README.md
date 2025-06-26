@@ -122,7 +122,7 @@ policy = CQLPolicy(
 
 Define logger:
 ```python
-log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args))
+log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
 output_config = {
     "consoleout_backup": "stdout",
     "policy_training_progress": "csv",
@@ -199,7 +199,7 @@ from offlinepbrl.utils.logger import Logger, make_log_dirs
 ```
 Then initialize logger:
 ```py
-log_dirs = make_log_dirs(args.task, args.algo_name, args.seed, vars(args))
+log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
 # key: output file name, value: output handler type
 output_config = {
     "consoleout_backup": "stdout",
