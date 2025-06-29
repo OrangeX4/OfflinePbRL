@@ -15,8 +15,7 @@ from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import IQLPolicy
-from offlinepbrl.policy.preference.bt import BTWrapper
+from offlinepbrl.policy import BTWrapper, IQLPolicy
 
 """
 suggested hypers

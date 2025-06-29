@@ -10,23 +10,21 @@ import torch
 
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian
-from offlinepbrl.modules.reward_module import RewardModel
+from offlinepbrl.modules.reward_module import GaussianRewardModel
 from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import BTWrapper, CQLPolicy
-
+from offlinepbrl.policy import CQLPolicy
+from offlinepbrl.policy.preference.gtm import GaussianTMWrapper
 
 """
-suggested hypers
-cql-weight=5.0, temperature=1.0 for all D4RL-Gym tasks
+Gaussian Thurstone-Mosteller with CQL
 """
-
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="bt_cql")
+    parser.add_argument("--algo-name", type=str, default="gtm_cql")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
@@ -48,20 +46,22 @@ def get_args():
     parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
     parser.add_argument("--num-repeat-actions", type=int, default=10)
     
+    # Gaussian TM specific parameters
+    parser.add_argument("--reward-model-lr", type=float, default=3e-4)
+    parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
+    parser.add_argument("--reward-reg", type=float, default=0.0)
+    parser.add_argument("--reward-ent-reg", type=float, default=0.1)
+    parser.add_argument("--entropy-threshold", type=float, default=0.1)
+    parser.add_argument("--reg-type", type=str, default="transition", choices=["transition", "trajectory"])
+    parser.add_argument("--rm-stop-epoch", type=int, default=50)
+    parser.add_argument("--policy-start-epoch", type=int, default=50)
+    
     parser.add_argument("--epoch", type=int, default=1050)
     parser.add_argument("--step-per-epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-
-    # BT specific parameters
-    parser.add_argument("--reward-model-lr", type=float, default=3e-4)
-    parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
-    parser.add_argument("--reward-reg", type=float, default=0.0)
-    parser.add_argument("--rm-stop-epoch", type=int, default=50)
-    parser.add_argument("--policy-start-epoch", type=int, default=50)
-    
     parser.add_argument("--pref-batch-size", type=int, default=64)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()
 
@@ -103,7 +103,10 @@ def train(args=get_args()):
     actor = ActorProb(actor_backbone, dist, args.device)
     critic1 = Critic(critic1_backbone, args.device)
     critic2 = Critic(critic2_backbone, args.device)
-    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    
+    # Use Gaussian reward model for Thurstone-Mosteller learning
+    reward_model = GaussianRewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
@@ -121,7 +124,7 @@ def train(args=get_args()):
     else:
         alpha = args.alpha
 
-    # create policy
+    # create CQL policy
     base_policy = CQLPolicy(
         actor,
         critic1,
@@ -143,12 +146,15 @@ def train(args=get_args()):
         num_repeart_actions=args.num_repeat_actions
     )
     
-    # Wrap with BT
-    policy = BTWrapper(
+    # Wrap with Gaussian TM
+    policy = GaussianTMWrapper(
         base_policy=base_policy,
         reward_model=reward_model,
         reward_model_optim=reward_model_optim,
         reward_reg=args.reward_reg,
+        reward_ent_reg=args.reward_ent_reg,
+        entropy_threshold=args.entropy_threshold,
+        reg_type=args.reg_type,
         rm_stop_epoch=args.rm_stop_epoch,
         policy_start_epoch=args.policy_start_epoch
     )

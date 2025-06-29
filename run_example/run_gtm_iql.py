@@ -10,37 +10,40 @@ import torch
 
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
-from offlinepbrl.modules.reward_module import RewardModel
+from offlinepbrl.modules.reward_module import GaussianRewardModel
 from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import BTWrapper, AWACPolicy
+from offlinepbrl.policy import GaussianTMWrapper, IQLPolicy
 
 """
-suggested hypers
-temperature=3.0 for all D4RL-Gym tasks
+Gaussian Thurstone-Mosteller with IQL
 """
-
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="bt_awac")
+    parser.add_argument("--algo-name", type=str, default="gtm_iql")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256])
     parser.add_argument("--actor-lr", type=float, default=3e-4)
     parser.add_argument("--critic-q-lr", type=float, default=3e-4)
+    parser.add_argument("--critic-v-lr", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=None)
     parser.add_argument("--lr-decay", type=bool, default=True)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
+    parser.add_argument("--expectile", type=float, default=0.7)
     parser.add_argument("--temperature", type=float, default=3.0)
     
-    # BT specific parameters
+    # Gaussian TM specific parameters
     parser.add_argument("--reward-model-lr", type=float, default=3e-4)
     parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
     parser.add_argument("--reward-reg", type=float, default=0.0)
+    parser.add_argument("--reward-ent-reg", type=float, default=0.1)
+    parser.add_argument("--entropy-threshold", type=float, default=0.1)
+    parser.add_argument("--reg-type", type=str, default="transition", choices=["transition", "trajectory"])
     parser.add_argument("--rm-stop-epoch", type=int, default=50)
     parser.add_argument("--policy-start-epoch", type=int, default=50)
     
@@ -116,6 +119,7 @@ def train(args=get_args()):
     actor_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims, dropout_rate=args.dropout_rate)
     critic_q1_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
+    critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
     reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     
     dist = DiagGaussian(
@@ -128,11 +132,15 @@ def train(args=get_args()):
     actor = ActorProb(actor_backbone, dist, args.device)
     critic_q1 = Critic(critic_q1_backbone, args.device)
     critic_q2 = Critic(critic_q2_backbone, args.device)
-    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    critic_v = Critic(critic_v_backbone, args.device)
+    
+    # Use Gaussian reward model for Thurstone-Mosteller learning
+    reward_model = GaussianRewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic_q1_optim = torch.optim.Adam(critic_q1.parameters(), lr=args.critic_q_lr)
     critic_q2_optim = torch.optim.Adam(critic_q2.parameters(), lr=args.critic_q_lr)
+    critic_v_optim = torch.optim.Adam(critic_v.parameters(), lr=args.critic_v_lr)
     reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
 
     if args.lr_decay:
@@ -140,26 +148,32 @@ def train(args=get_args()):
     else:
         lr_scheduler = None
     
-    # create AWAC policy
-    base_policy = AWACPolicy(
+    # create IQL policy
+    base_policy = IQLPolicy(
         actor,
         critic_q1,
         critic_q2,
+        critic_v,
         actor_optim,
         critic_q1_optim,
         critic_q2_optim,
+        critic_v_optim,
         action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
+        expectile=args.expectile,
         temperature=args.temperature
     )
     
-    # Wrap with BT
-    policy = BTWrapper(
+    # Wrap with Gaussian TM
+    policy = GaussianTMWrapper(
         base_policy=base_policy,
         reward_model=reward_model,
         reward_model_optim=reward_model_optim,
         reward_reg=args.reward_reg,
+        reward_ent_reg=args.reward_ent_reg,
+        entropy_threshold=args.entropy_threshold,
+        reg_type=args.reg_type,
         rm_stop_epoch=args.rm_stop_epoch,
         policy_start_epoch=args.policy_start_epoch
     )

@@ -23,6 +23,8 @@ from offlinepbrl.policy.preference.ipl_awac import IPLAWACPolicy
 from offlinepbrl.policy.preference.ipl_cql import IPLCQLPolicy
 from offlinepbrl.policy.preference.cprl import CPRLPolicy
 from offlinepbrl.policy.preference.bcl import BCLPolicy
+from offlinepbrl.policy.preference.bt import BTWrapper
+from offlinepbrl.policy.preference.gtm import GaussianTMWrapper
 
 __all__ = [
     "BasePolicy",
@@ -43,5 +45,7 @@ __all__ = [
     "IPLAWACPolicy",
     "IPLCQLPolicy",
     "CPRLPolicy",
-    "BCLPolicy"
+    "BCLPolicy",
+    "BTWrapper",
+    "GaussianTMWrapper",
 ]
