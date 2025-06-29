@@ -48,7 +48,7 @@ def get_args():
     parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
     parser.add_argument("--num-repeat-actions", type=int, default=10)
     
-    parser.add_argument("--epoch", type=int, default=1050)
+    parser.add_argument("--epoch", type=int, default=1200)
     parser.add_argument("--step-per-epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -58,10 +58,10 @@ def get_args():
     parser.add_argument("--reward-model-lr", type=float, default=3e-4)
     parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
     parser.add_argument("--reward-reg", type=float, default=0.0)
-    parser.add_argument("--rm-stop-epoch", type=int, default=50)
-    parser.add_argument("--policy-start-epoch", type=int, default=50)
+    parser.add_argument("--rm-stop-epoch", type=int, default=200)
+    parser.add_argument("--policy-start-epoch", type=int, default=200)
     
-    parser.add_argument("--pref-batch-size", type=int, default=64)
+    parser.add_argument("--pref-batch-size", type=int, default=8)
 
     return parser.parse_args()
 
