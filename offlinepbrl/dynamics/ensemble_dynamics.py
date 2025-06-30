@@ -88,6 +88,10 @@ class EnsembleDynamics(BaseDynamics):
             elif uncertainty_mode == "ensemble_std":
                 next_obses_mean = mean[..., :-1]
                 penalty = np.sqrt(next_obses_mean.var(0).mean(1))
+            elif uncertainty_mode == "ensemble-std-reward":
+                # Use ensemble standard deviation for reward uncertainty
+                rewards_mean = mean[..., -1:]
+                penalty = np.sqrt(rewards_mean.var(0))
             elif uncertainty_mode == "null":
                 penalty = np.zeros_like(reward)
             else:
@@ -409,7 +413,7 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             logger.logkv("info/reward_win_std", info["rewards_win"].std().item())
             logger.logkv("info/reward_lose_mean", info["rewards_lose"].mean().item())
             logger.logkv("info/reward_lose_std", info["rewards_lose"].std().item())
-            logger.logkv("info/reward_mean_diff", torch.abs(info["rewards_win"].mean() - info["rewards_lose"].mean()).item())
+            logger.logkv("info/reward_mean_diff", info["reward_mean_diff"].item())
             logger.set_timestep(epoch)
             logger.dumpkvs(exclude=["policy_training_progress"])
 
@@ -484,6 +488,9 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         self.model.train()
         train_size = inputs_1.shape[1]
         losses = []
+        
+        # Bradley-Terry loss criterion similar to bt.py
+        reward_criterion = torch.nn.BCEWithLogitsLoss(reduction="none")
 
         for batch_num in range(int(np.ceil(train_size / batch_size))):
             inputs_1_batch = inputs_1[:, batch_num * batch_size:(batch_num + 1) * batch_size]
@@ -496,13 +503,23 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
             reward_mean_1, logvar_1 = mean_1.reshape(N, *P, -1)[..., -1], logvar_1.reshape(N, *P, -1)[..., -1]
             mean_2, logvar_2 = self.model(inputs_2_batch.reshape(N, -1, M))
             reward_mean_2, logvar_2 = mean_2.reshape(N, *P, -1)[..., -1], logvar_2.reshape(N, *P, -1)[..., -1]
-            logits = reward_mean_1.sum(dim=2) - reward_mean_2.sum(dim=2)
-            std = torch.sqrt(torch.cat([torch.exp(logvar_1), torch.exp(logvar_2)], dim=2).sum(dim=2))
-            probs = gaussian_cdf(logits / std)
+            
+            # Bradley-Terry model: logits = sum(reward_2) - sum(reward_1)
+            logits = reward_mean_2.sum(dim=2) - reward_mean_1.sum(dim=2)
+            # Use labels[..., 1] as in bt.py (preference for trajectory 2)
+            bt_labels = labels_batch[..., 1].float()
+            
+            # Bradley-Terry preference loss
+            pref_loss = reward_criterion(logits, bt_labels).mean()
+            
+            # Reward regularization loss
+            reg_loss = (reward_mean_1.square().mean() + reward_mean_2.square().mean()) / 2
+            
+            # Small loss to force reward model std to zero (minimize reward uncertainty)
+            reward_std_loss = (torch.exp(logvar_1).mean() + torch.exp(logvar_2).mean())
+            
             # Average over batch and dim, sum over ensembles.
-            xent_loss_inv = -((labels_batch[..., 0] * torch.log(probs + 1e-8) + labels_batch[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1))
-            var_loss = logvar_1.mean(dim=(1, 2)) + logvar_2.mean(dim=(1, 2))
-            loss = xent_loss_inv.sum() + var_loss.sum()
+            loss = pref_loss.sum() + reg_loss.sum() + reward_std_loss.sum()
             loss = loss + self.model.get_decay_loss()
             loss = loss + logvar_loss_coef * self.model.max_logvar[-1] - logvar_loss_coef * self.model.min_logvar[-1]
 
@@ -527,19 +544,30 @@ class EnsemblePreferenceDynamics(EnsembleDynamics):
         reward_mean_1, logvar_1 = rlhf_mean_1.reshape(N, *P, -1)[..., -1], logvar_1.reshape(N, *P, -1)[..., -1]
         rlhf_mean_2, logvar_2 = self.model(rlhf_inputs_2.reshape(-1, M))
         reward_mean_2, logvar_2 = rlhf_mean_2.reshape(N, *P, -1)[..., -1], logvar_2.reshape(N, *P, -1)[..., -1]
-        logits = reward_mean_1.sum(dim=2) - reward_mean_2.sum(dim=2)
-        probs = gaussian_cdf(logits)
-        rlhf_loss = -(rlhf_labels[..., 0] * torch.log(probs + 1e-8) + rlhf_labels[..., 1] * torch.log(1 - probs + 1e-8)).mean(dim=1)
-        accuracies = ((logits > 0).float() == rlhf_labels[..., 0]).float().cpu().numpy()
-        rewards_win = torch.where((rlhf_labels[..., 0] == 1).unsqueeze(-1), reward_mean_1, reward_mean_2)
-        rewards_lose = torch.where((rlhf_labels[..., 1] == 1).unsqueeze(-1), reward_mean_1, reward_mean_2)
+        
+        # Bradley-Terry model: logits = sum(reward_2) - sum(reward_1)
+        logits = reward_mean_2.sum(dim=2) - reward_mean_1.sum(dim=2)
+        bt_labels = rlhf_labels[..., 1].float()
+        
+        # Bradley-Terry loss using BCEWithLogitsLoss
+        reward_criterion = torch.nn.BCEWithLogitsLoss(reduction="none")
+        rlhf_loss = reward_criterion(logits, bt_labels).mean(dim=1)
+        
+        # Accuracy calculation
+        accuracies = ((logits > 0).float() == bt_labels).float().cpu().numpy()
+        
+        # Compute reward statistics similar to bt.py
+        rewards_all = torch.cat([reward_mean_1.flatten(start_dim=1), reward_mean_2.flatten(start_dim=1)], dim=1)
+        rewards_win = torch.where(bt_labels.unsqueeze(-1) == 1, reward_mean_2, reward_mean_1)
+        rewards_lose = torch.where(bt_labels.unsqueeze(-1) == 0, reward_mean_2, reward_mean_1)
 
         val_loss = list((dynamics_loss + rlhf_loss).cpu().numpy())
         info = {
             'accuracies': accuracies,
             'rewards': torch.cat([reward_mean_1, reward_mean_2], dim=2).cpu().numpy(),
-            'rewards_win': rewards_win,
-            'rewards_lose': rewards_lose,
+            'rewards_win': rewards_win.cpu().numpy(),
+            'rewards_lose': rewards_lose.cpu().numpy(),
+            'reward_mean_diff': torch.abs(rewards_win.mean() - rewards_lose.mean()).cpu().numpy(),
             'std': torch.cat([torch.sqrt(torch.exp(logvar_1)), torch.sqrt(torch.exp(logvar_2))], dim=2).cpu().numpy(),
         }
         return val_loss, info
