@@ -96,7 +96,12 @@ class EnsembleDynamics(BaseDynamics):
                 penalty = np.zeros_like(reward)
             else:
                 raise ValueError
-            penalty = np.expand_dims(penalty, 1).astype(np.float32)
+            
+            if uncertainty_mode == "ensemble-std-reward":
+                # penalty is already in the right shape from above
+                penalty = penalty.astype(np.float32)
+            else:
+                penalty = np.expand_dims(penalty, 1).astype(np.float32)
             assert penalty.shape == reward.shape
             reward = reward - self._penalty_coef * penalty
             info["penalty"] = penalty
