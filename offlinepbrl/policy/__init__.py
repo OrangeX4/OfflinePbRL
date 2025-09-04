@@ -25,6 +25,7 @@ from offlinepbrl.policy.preference.aipl_iql import AdversarialIPLIQLPolicy
 from offlinepbrl.policy.preference.cprl import CPRLPolicy
 from offlinepbrl.policy.preference.bcl import BCLPolicy
 from offlinepbrl.policy.preference.bt import BTWrapper
+from offlinepbrl.policy.preference.abt import AdversarialBTWrapper
 from offlinepbrl.policy.preference.wbt import WeightedBTWrapper
 from offlinepbrl.policy.preference.gtm import GaussianTMWrapper
 
@@ -49,5 +50,6 @@ __all__ = [
     "CPRLPolicy",
     "BCLPolicy",
     "BTWrapper",
+    "AdversarialBTWrapper",
     "GaussianTMWrapper",
 ]
