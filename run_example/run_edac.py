@@ -20,42 +20,42 @@ from offlinepbrl.policy import EDACPolicy
 """
 suggested hypers
 
-halfcheetah-medium-v2: num-critics=10, eta=1.0
-hopper-medium-v2: num-critics=50, eta=1.0
-walker2d-medium-v2: num-critics=10, eta=1.0
-halfcheetah-medium-replay-v2: num-critics=10, eta=1.0
-hopper-medium-replay-v2: num-critics=50, eta=1.0
-walker2d-medium-replay-v2: num-critics=10, eta=1.0
-halfcheetah-medium-expert-v2: num-critics=10, eta=5.0
-hopper-medium-expert-v2: num-critics=50, eta=1.0
-walker2d-medium-expert-v2: num-critics=10, eta=5.0
+halfcheetah-medium-v2: num_critics=10, eta=1.0
+hopper-medium-v2: num_critics=50, eta=1.0
+walker2d-medium-v2: num_critics=10, eta=1.0
+halfcheetah-medium-replay-v2: num_critics=10, eta=1.0
+hopper-medium-replay-v2: num_critics=50, eta=1.0
+walker2d-medium-replay-v2: num_critics=10, eta=1.0
+halfcheetah-medium-expert-v2: num_critics=10, eta=5.0
+hopper-medium-expert-v2: num_critics=50, eta=1.0
+walker2d-medium-expert-v2: num_critics=10, eta=5.0
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="edac")
+    parser.add_argument("--algo_name", type=str, default="edac")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--actor-lr", type=float, default=1e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
-    parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
+    parser.add_argument("--actor_lr", type=float, default=1e-4)
+    parser.add_argument("--critic_lr", type=float, default=3e-4)
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--auto-alpha", type=bool, default=True)
-    parser.add_argument("--target-entropy", type=int, default=None)
-    parser.add_argument("--alpha-lr", type=float, default=1e-4)
-    parser.add_argument("--num-critics", type=int, default=50)
-    parser.add_argument("--max-q-backup", type=bool, default=False)
-    parser.add_argument("--deterministic-backup", type=bool, default=False)
+    parser.add_argument("--auto_alpha", type=bool, default=True)
+    parser.add_argument("--target_entropy", type=int, default=None)
+    parser.add_argument("--alpha_lr", type=float, default=1e-4)
+    parser.add_argument("--num_critics", type=int, default=50)
+    parser.add_argument("--max_q_backup", type=bool, default=False)
+    parser.add_argument("--deterministic_backup", type=bool, default=False)
     parser.add_argument("--eta", type=float, default=1.0)
-    parser.add_argument("--normalize-reward", type=bool, default=False)
+    parser.add_argument("--normalize_reward", type=bool, default=False)
 
     parser.add_argument("--epoch", type=int, default=3000)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()

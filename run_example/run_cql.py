@@ -19,38 +19,38 @@ from offlinepbrl.policy import CQLPolicy
 
 """
 suggested hypers
-cql-weight=5.0, temperature=1.0 for all D4RL-Gym tasks
+cql_weight=5.0, temperature=1.0 for all D4RL-Gym tasks
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="cql")
+    parser.add_argument("--algo_name", type=str, default="cql")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
-    parser.add_argument("--actor-lr", type=float, default=1e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
+    parser.add_argument("--actor_lr", type=float, default=1e-4)
+    parser.add_argument("--critic_lr", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--target-entropy", type=int, default=None)
-    parser.add_argument("--auto-alpha", default=True)
-    parser.add_argument("--alpha-lr", type=float, default=1e-4)
+    parser.add_argument("--target_entropy", type=int, default=None)
+    parser.add_argument("--auto_alpha", default=True)
+    parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    parser.add_argument("--cql-weight", type=float, default=5.0)
+    parser.add_argument("--cql_weight", type=float, default=5.0)
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--max-q-backup", type=bool, default=False)
-    parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--with-lagrange", type=bool, default=False)
-    parser.add_argument("--lagrange-threshold", type=float, default=10.0)
-    parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
-    parser.add_argument("--num-repeat-actions", type=int, default=10)
+    parser.add_argument("--max_q_backup", type=bool, default=False)
+    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--with_lagrange", type=bool, default=False)
+    parser.add_argument("--lagrange_threshold", type=float, default=10.0)
+    parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
+    parser.add_argument("--num_repeat_actions", type=int, default=10)
     
     parser.add_argument("--epoch", type=int, default=1000)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()

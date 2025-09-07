@@ -19,14 +19,14 @@ from offlinepbrl.policy import BCPolicy
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="bc")
+    parser.add_argument("--algo_name", type=str, default="bc")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--actor-lr", type=float, default=3e-4)
+    parser.add_argument("--actor_lr", type=float, default=3e-4)
     parser.add_argument("--epoch", type=int, default=200)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()

@@ -22,59 +22,59 @@ from offlinepbrl.utils.termination_fns import get_termination_fn
 
 """
 suggested hypers
-cql-weight=5.0, temperature=1.0 for all D4RL-Gym tasks
+cql_weight=5.0, temperature=1.0 for all D4RL-Gym tasks
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="wbt_cql")
+    parser.add_argument("--algo_name", type=str, default="wbt_cql")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
-    parser.add_argument("--actor-lr", type=float, default=1e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
+    parser.add_argument("--actor_lr", type=float, default=1e-4)
+    parser.add_argument("--critic_lr", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--target-entropy", type=int, default=None)
-    parser.add_argument("--auto-alpha", default=True)
-    parser.add_argument("--alpha-lr", type=float, default=1e-4)
+    parser.add_argument("--target_entropy", type=int, default=None)
+    parser.add_argument("--auto_alpha", default=True)
+    parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    parser.add_argument("--cql-weight", type=float, default=5.0)
+    parser.add_argument("--cql_weight", type=float, default=5.0)
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--max-q-backup", type=bool, default=False)
-    parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--with-lagrange", type=bool, default=False)
-    parser.add_argument("--lagrange-threshold", type=float, default=10.0)
-    parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
-    parser.add_argument("--num-repeat-actions", type=int, default=10)
+    parser.add_argument("--max_q_backup", type=bool, default=False)
+    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--with_lagrange", type=bool, default=False)
+    parser.add_argument("--lagrange_threshold", type=float, default=10.0)
+    parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
+    parser.add_argument("--num_repeat_actions", type=int, default=10)
 
 
-    parser.add_argument("--dynamics-lr", type=float, default=1e-3)
-    parser.add_argument("--dynamics-hidden-dims", type=int, nargs='*', default=[200, 200, 200, 200])
-    parser.add_argument("--dynamics-weight-decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
-    parser.add_argument("--n-ensemble", type=int, default=7)
-    parser.add_argument("--n-elites", type=int, default=5)
-    parser.add_argument("--penalty-coef", type=float, default=2.5)
-    parser.add_argument("--model-retain-epochs", type=int, default=5)
-    parser.add_argument("--real-ratio", type=float, default=0.05)
-    parser.add_argument("--load-dynamics-path", type=str, default=None)
+    parser.add_argument("--dynamics_lr", type=float, default=1e-3)
+    parser.add_argument("--dynamics_hidden_dims", type=int, nargs='*', default=[200, 200, 200, 200])
+    parser.add_argument("--dynamics_weight_decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
+    parser.add_argument("--n_ensemble", type=int, default=7)
+    parser.add_argument("--n_elites", type=int, default=5)
+    parser.add_argument("--penalty_coef", type=float, default=2.5)
+    parser.add_argument("--model_retain_epochs", type=int, default=5)
+    parser.add_argument("--real_ratio", type=float, default=0.05)
+    parser.add_argument("--load_dynamics_path", type=str, default=None)
     
     parser.add_argument("--epoch", type=int, default=1200)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     # BT specific parameters
-    parser.add_argument("--reward-model-lr", type=float, default=3e-4)
-    parser.add_argument("--reward-activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
-    parser.add_argument("--reward-reg", type=float, default=0.0)
-    parser.add_argument("--rm-stop-epoch", type=int, default=200)
-    parser.add_argument("--policy-start-epoch", type=int, default=200)
+    parser.add_argument("--reward_model_lr", type=float, default=3e-4)
+    parser.add_argument("--reward_activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
+    parser.add_argument("--reward_reg", type=float, default=0.0)
+    parser.add_argument("--rm_stop_epoch", type=int, default=200)
+    parser.add_argument("--policy_start_epoch", type=int, default=200)
     
-    parser.add_argument("--pref-batch-size", type=int, default=8)
+    parser.add_argument("--pref_batch_size", type=int, default=8)
 
     return parser.parse_args()
 
@@ -134,7 +134,7 @@ def train(args=get_args()):
         scaler,
         termination_fn,
         penalty_coef=args.penalty_coef,
-        uncertainty_mode="aleatoric-dynamics",
+        uncertainty_mode="aleatoric_dynamics",
     )
 
     if args.load_dynamics_path:

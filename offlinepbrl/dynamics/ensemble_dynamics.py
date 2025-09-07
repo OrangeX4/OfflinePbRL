@@ -76,11 +76,11 @@ class EnsembleDynamics(BaseDynamics):
         if self._penalty_coef:
             if uncertainty_mode == "aleatoric":
                 penalty = np.amax(np.linalg.norm(std, axis=2), axis=0)
-            elif uncertainty_mode == "aleatoric-reward":
+            elif uncertainty_mode == "aleatoric_reward":
                 penalty = np.amax(np.linalg.norm(std[..., -1:], axis=2), axis=0)
-            elif uncertainty_mode == "aleatoric-dynamics":
+            elif uncertainty_mode == "aleatoric_dynamics":
                 penalty = np.amax(np.linalg.norm(std[..., :-1], axis=2), axis=0)
-            elif uncertainty_mode == "pairwise-diff":
+            elif uncertainty_mode == "pairwise_diff":
                 next_obses_mean = mean[..., :-1]
                 next_obs_mean = np.mean(next_obses_mean, axis=0)
                 diff = next_obses_mean - next_obs_mean
@@ -88,7 +88,7 @@ class EnsembleDynamics(BaseDynamics):
             elif uncertainty_mode == "ensemble_std":
                 next_obses_mean = mean[..., :-1]
                 penalty = np.sqrt(next_obses_mean.var(0).mean(1))
-            elif uncertainty_mode == "ensemble-std-reward":
+            elif uncertainty_mode == "ensemble_std_reward":
                 # Use ensemble standard deviation for reward uncertainty
                 rewards_mean = mean[..., -1:]
                 penalty = np.sqrt(rewards_mean.var(0))
@@ -97,7 +97,7 @@ class EnsembleDynamics(BaseDynamics):
             else:
                 raise ValueError
             
-            if uncertainty_mode == "ensemble-std-reward":
+            if uncertainty_mode == "ensemble_std_reward":
                 # penalty is already in the right shape from above
                 penalty = penalty.astype(np.float32)
             else:

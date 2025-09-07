@@ -25,65 +25,65 @@ from offlinepbrl.policy import COMBOPolicy
 """
 suggested hypers
 
-halfcheetah-medium-v2: rollout-length=5, cql-weight=0.5
-hopper-medium-v2: rollout-length=5, cql-weight=5.0
-walker2d-medium-v2: rollout-length=1, cql-weight=5.0
-halfcheetah-medium-replay-v2: rollout-length=5, cql-weight=0.5
-hopper-medium-replay-v2: rollout-length=5, cql-weight=0.5
-walker2d-medium-replay-v2: rollout-length=1, cql-weight=0.5
-halfcheetah-medium-expert-v2: rollout-length=5, cql-weight=5.0
-hopper-medium-expert-v2: rollout-length=5, cql-weight=5.0
-walker2d-medium-expert-v2: rollout-length=1, cql-weight=5.0
+halfcheetah-medium-v2: rollout_length=5, cql_weight=0.5
+hopper-medium-v2: rollout_length=5, cql_weight=5.0
+walker2d-medium-v2: rollout_length=1, cql_weight=5.0
+halfcheetah-medium-replay-v2: rollout_length=5, cql_weight=0.5
+hopper-medium-replay-v2: rollout_length=5, cql_weight=0.5
+walker2d-medium-replay-v2: rollout_length=1, cql_weight=0.5
+halfcheetah-medium-expert-v2: rollout_length=5, cql_weight=5.0
+hopper-medium-expert-v2: rollout_length=5, cql_weight=5.0
+walker2d-medium-expert-v2: rollout_length=1, cql_weight=5.0
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="combo_p")
+    parser.add_argument("--algo_name", type=str, default="combo_p")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--actor-lr", type=float, default=1e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
-    parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
+    parser.add_argument("--actor_lr", type=float, default=1e-4)
+    parser.add_argument("--critic_lr", type=float, default=3e-4)
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--auto-alpha", default=True)
-    parser.add_argument("--target-entropy", type=int, default=None)
-    parser.add_argument("--alpha-lr", type=float, default=1e-4)
+    parser.add_argument("--auto_alpha", default=True)
+    parser.add_argument("--target_entropy", type=int, default=None)
+    parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    parser.add_argument("--cql-weight", type=float, default=5.0)
+    parser.add_argument("--cql_weight", type=float, default=5.0)
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--max-q-backup", type=bool, default=False)
-    parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--with-lagrange", type=bool, default=False)
-    parser.add_argument("--lagrange-threshold", type=float, default=10.0)
-    parser.add_argument("--cql-alpha-lr", type=float, default=3e-4)
-    parser.add_argument("--num-repeat-actions", type=int, default=10)
-    parser.add_argument("--uniform-rollout", type=bool, default=False)
-    parser.add_argument("--rho-s", type=str, default="mix", choices=["model", "mix"])
+    parser.add_argument("--max_q_backup", type=bool, default=False)
+    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--with_lagrange", type=bool, default=False)
+    parser.add_argument("--lagrange_threshold", type=float, default=10.0)
+    parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
+    parser.add_argument("--num_repeat_actions", type=int, default=10)
+    parser.add_argument("--uniform_rollout", type=bool, default=False)
+    parser.add_argument("--rho_s", type=str, default="mix", choices=["model", "mix"])
 
-    parser.add_argument("--dynamics-lr", type=float, default=1e-3)
-    parser.add_argument("--dynamics-hidden-dims", type=int, nargs='*', default=[200, 200, 200, 200])
-    parser.add_argument("--dynamics-weight-decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
-    parser.add_argument("--n-ensemble", type=int, default=7)
-    parser.add_argument("--n-elites", type=int, default=5)
-    parser.add_argument("--reward-activation", type=str, default="sigmoid")
-    parser.add_argument("--ensemble-reward", type=bool, default=True)
-    parser.add_argument("--rollout-freq", type=int, default=1000)
-    parser.add_argument("--rollout-batch-size", type=int, default=50000)
-    parser.add_argument("--rollout-length", type=int, default=5)
-    parser.add_argument("--uncertainty-mode", type=str, default="aleatoric")
-    parser.add_argument("--reward-uncertainty-mode", type=str, default="ensemble-std-reward")
-    parser.add_argument("--penalty-coef", type=float, default=0.025)
-    parser.add_argument("--model-retain-epochs", type=int, default=5)
-    parser.add_argument("--real-ratio", type=float, default=0.5)
-    parser.add_argument("--load-dynamics-path", type=str, default=None)
+    parser.add_argument("--dynamics_lr", type=float, default=1e-3)
+    parser.add_argument("--dynamics_hidden_dims", type=int, nargs='*', default=[200, 200, 200, 200])
+    parser.add_argument("--dynamics_weight_decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
+    parser.add_argument("--n_ensemble", type=int, default=7)
+    parser.add_argument("--n_elites", type=int, default=5)
+    parser.add_argument("--reward_activation", type=str, default="sigmoid")
+    parser.add_argument("--ensemble_reward", type=bool, default=True)
+    parser.add_argument("--rollout_freq", type=int, default=1000)
+    parser.add_argument("--rollout_batch_size", type=int, default=50000)
+    parser.add_argument("--rollout_length", type=int, default=5)
+    parser.add_argument("--uncertainty_mode", type=str, default="aleatoric")
+    parser.add_argument("--reward_uncertainty_mode", type=str, default="ensemble_std_reward")
+    parser.add_argument("--penalty_coef", type=float, default=0.025)
+    parser.add_argument("--model_retain_epochs", type=int, default=5)
+    parser.add_argument("--real_ratio", type=float, default=0.5)
+    parser.add_argument("--load_dynamics_path", type=str, default=None)
 
     parser.add_argument("--epoch", type=int, default=1000)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()

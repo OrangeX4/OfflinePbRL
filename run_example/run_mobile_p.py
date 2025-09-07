@@ -21,66 +21,66 @@ from offlinepbrl.policy import MOBILEPolicy
 
 """
 suggested hypers
-halfcheetah-random-v2: rollout-length=5, penalty-coef=0.5
-hopper-random-v2: rollout-length=5, penalty-coef=5.0
-walker2d-random-v2: rollout-length=5, penalty-coef=2.0
-halfcheetah-medium-v2: rollout-length=5, penalty-coef=0.5
-hopper-medium-v2: rollout-length=5, penalty-coef=1.5 auto-alpha=False
-walker2d-medium-v2: rollout-length=5, penalty-coef=0.5
-halfcheetah-medium-replay-v2: rollout-length=5, penalty-coef=0.1
-hopper-medium-replay-v2: rollout-length=5, penalty-coef=0.1
-walker2d-medium-replay-v2: rollout-length=1, penalty-coef=0.5
-halfcheetah-medium-expert-v2: rollout-length=5, penalty-coef=2.0
-hopper-medium-expert-v2: rollout-length=5, penalty-coef=1.5
-walker2d-medium-expert-v2: rollout-length=1, penalty-coef=1.5
+halfcheetah-random-v2: rollout_length=5, penalty_coef=0.5
+hopper-random-v2: rollout_length=5, penalty_coef=5.0
+walker2d-random-v2: rollout_length=5, penalty_coef=2.0
+halfcheetah-medium-v2: rollout_length=5, penalty_coef=0.5
+hopper-medium-v2: rollout_length=5, penalty_coef=1.5 auto_alpha=False
+walker2d-medium-v2: rollout_length=5, penalty_coef=0.5
+halfcheetah-medium-replay-v2: rollout_length=5, penalty_coef=0.1
+hopper-medium-replay-v2: rollout_length=5, penalty_coef=0.1
+walker2d-medium-replay-v2: rollout_length=1, penalty_coef=0.5
+halfcheetah-medium-expert-v2: rollout_length=5, penalty_coef=2.0
+hopper-medium-expert-v2: rollout_length=5, penalty_coef=1.5
+walker2d-medium-expert-v2: rollout_length=1, penalty_coef=1.5
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo-name", type=str, default="mobile_p")
+    parser.add_argument("--algo_name", type=str, default="mobile_p")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--actor-lr", type=float, default=1e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
-    parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256])
+    parser.add_argument("--actor_lr", type=float, default=1e-4)
+    parser.add_argument("--critic_lr", type=float, default=3e-4)
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--auto-alpha", type=bool, default=True)
-    parser.add_argument("--target-entropy", type=int, default=None)
-    parser.add_argument("--alpha-lr", type=float, default=1e-4)
+    parser.add_argument("--auto_alpha", type=bool, default=True)
+    parser.add_argument("--target_entropy", type=int, default=None)
+    parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    parser.add_argument("--num-q-ensemble", type=int, default=2)
-    parser.add_argument("--deterministic-backup", type=bool, default=True)
-    parser.add_argument("--max-q-backup", type=bool, default=False)
-    parser.add_argument("--norm-reward", type=bool, default=False)
+    parser.add_argument("--num_q_ensemble", type=int, default=2)
+    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--max_q_backup", type=bool, default=False)
+    parser.add_argument("--norm_reward", type=bool, default=False)
 
-    parser.add_argument("--dynamics-lr", type=float, default=1e-3)
-    parser.add_argument("--max-epochs-since-update", type=int, default=5)
-    parser.add_argument("--dynamics-max-epochs", type=int, default=30)
-    parser.add_argument("--dynamics-hidden-dims", type=int, nargs='*', default=[200, 200, 200, 200])
-    parser.add_argument("--dynamics-weight-decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
-    parser.add_argument("--n-ensemble", type=int, default=7)
-    parser.add_argument("--n-elites", type=int, default=5)
-    parser.add_argument("--rollout-freq", type=int, default=1000)
-    parser.add_argument("--rollout-batch-size", type=int, default=50000)
-    parser.add_argument("--rollout-length", type=int, default=1)
-    parser.add_argument("--penalty-coef", type=float, default=0.015)
-    parser.add_argument("--num-samples", type=int, default=10)
-    parser.add_argument("--model-retain-epochs", type=int, default=5)
-    parser.add_argument("--real-ratio", type=float, default=0.05)
-    parser.add_argument("--load-dynamics-path", type=str, default=None)
-    parser.add_argument("--reward-activation", type=str, default="sigmoid")
-    parser.add_argument("--ensemble-reward", type=bool, default=True)
-    parser.add_argument("--uncertainty-mode", type=str, default="aleatoric")
-    parser.add_argument("--reward-uncertainty-mode", type=str, default="ensemble-std-reward")
+    parser.add_argument("--dynamics_lr", type=float, default=1e-3)
+    parser.add_argument("--max_epochs_since_update", type=int, default=5)
+    parser.add_argument("--dynamics_max_epochs", type=int, default=30)
+    parser.add_argument("--dynamics_hidden_dims", type=int, nargs='*', default=[200, 200, 200, 200])
+    parser.add_argument("--dynamics_weight_decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
+    parser.add_argument("--n_ensemble", type=int, default=7)
+    parser.add_argument("--n_elites", type=int, default=5)
+    parser.add_argument("--rollout_freq", type=int, default=1000)
+    parser.add_argument("--rollout_batch_size", type=int, default=50000)
+    parser.add_argument("--rollout_length", type=int, default=1)
+    parser.add_argument("--penalty_coef", type=float, default=0.015)
+    parser.add_argument("--num_samples", type=int, default=10)
+    parser.add_argument("--model_retain_epochs", type=int, default=5)
+    parser.add_argument("--real_ratio", type=float, default=0.05)
+    parser.add_argument("--load_dynamics_path", type=str, default=None)
+    parser.add_argument("--reward_activation", type=str, default="sigmoid")
+    parser.add_argument("--ensemble_reward", type=bool, default=True)
+    parser.add_argument("--uncertainty_mode", type=str, default="aleatoric")
+    parser.add_argument("--reward_uncertainty_mode", type=str, default="ensemble_std_reward")
 
     parser.add_argument("--epoch", type=int, default=3000)
-    parser.add_argument("--step-per-epoch", type=int, default=1000)
+    parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--lr-scheduler", type=bool, default=True)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--lr_scheduler", type=bool, default=True)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()
