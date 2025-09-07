@@ -344,8 +344,8 @@ class Logger(object):
 
 
 def make_log_dirs(
-    task_name: str,
     algo_name: str,
+    task_name: str,
     seed: int,
     args: Dict,
     record_params: Optional[List]=None
@@ -355,7 +355,7 @@ def make_log_dirs(
             algo_name += f"&{param_name}={args[param_name]}"
     timestamp = datetime.datetime.now().strftime("%y-%m%d-%H%M%S")
     exp_name = f"seed_{seed}&timestamp_{timestamp}"
-    log_dirs = os.path.join(ROOT_DIR, task_name, algo_name, exp_name)
+    log_dirs = os.path.join(ROOT_DIR, algo_name, task_name, exp_name)
     os.makedirs(log_dirs)
     return log_dirs
 
