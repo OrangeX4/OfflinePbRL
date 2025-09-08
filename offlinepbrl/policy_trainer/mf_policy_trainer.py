@@ -29,6 +29,7 @@ class MFPolicyTrainer:
         pref_buffer: Optional[PrefBuffer] = None,
         pref_batch_size: Optional[int] = None,
         pref_batch_num: Optional[int] = None,
+        eval_freq: int = 1,
     ) -> None:
         self.policy = policy
         self.eval_env = eval_env
@@ -43,6 +44,7 @@ class MFPolicyTrainer:
         self._batch_size = batch_size
         self._eval_episodes = eval_episodes
         self.lr_scheduler = lr_scheduler
+        self._eval_freq = eval_freq
 
     def train(self) -> Dict[str, float]:
         start_time = time.time()
@@ -86,35 +88,37 @@ class MFPolicyTrainer:
                 self.lr_scheduler.step()
             
             # evaluate current policy
-            eval_info = self._evaluate()
-            ep_reward_mean, ep_reward_std = np.mean(eval_info["eval/episode_reward"]), np.std(eval_info["eval/episode_reward"])
-            ep_length_mean, ep_length_std = np.mean(eval_info["eval/episode_length"]), np.std(eval_info["eval/episode_length"])
-            
-            # Check if environment has normalized score method (D4RL environments)
-            if hasattr(self.eval_env, 'get_normalized_score'):
-                norm_ep_rew_mean = self.eval_env.get_normalized_score(ep_reward_mean) * 100
-                norm_ep_rew_std = self.eval_env.get_normalized_score(ep_reward_std) * 100
-                last_10_performance.append(norm_ep_rew_mean)
-                self.logger.logkv("eval/normalized_episode_reward", norm_ep_rew_mean)
-                self.logger.logkv("eval/normalized_episode_reward_std", norm_ep_rew_std)
-            else:
-                # For environments without normalized score (e.g., MetaWorld)
-                last_10_performance.append(ep_reward_mean)
-                self.logger.logkv("eval/episode_reward", ep_reward_mean)
-                self.logger.logkv("eval/episode_reward_std", ep_reward_std)
-            
-            # Log success rate for MetaWorld environments
-            if "eval/episode_success" in eval_info:
-                ep_success_mean = np.mean(eval_info["eval/episode_success"]) * 100  # Convert to percentage
-                ep_success_std = np.std(eval_info["eval/episode_success"]) * 100
-                self.logger.logkv("eval/episode_success", ep_success_mean)
-                self.logger.logkv("eval/episode_success_std", ep_success_std)
-            
-            self.logger.logkv("eval/episode_length", ep_length_mean)
-            self.logger.logkv("eval/episode_length_std", ep_length_std)
+            if e % self._eval_freq == 0:
+                eval_info = self._evaluate()
+                ep_reward_mean, ep_reward_std = np.mean(eval_info["eval/episode_reward"]), np.std(eval_info["eval/episode_reward"])
+                ep_length_mean, ep_length_std = np.mean(eval_info["eval/episode_length"]), np.std(eval_info["eval/episode_length"])
+                
+                # Check if environment has normalized score method (D4RL environments)
+                if hasattr(self.eval_env, 'get_normalized_score'):
+                    norm_ep_rew_mean = self.eval_env.get_normalized_score(ep_reward_mean) * 100
+                    norm_ep_rew_std = self.eval_env.get_normalized_score(ep_reward_std) * 100
+                    last_10_performance.append(norm_ep_rew_mean)
+                    self.logger.logkv("eval/normalized_episode_reward", norm_ep_rew_mean)
+                    self.logger.logkv("eval/normalized_episode_reward_std", norm_ep_rew_std)
+                else:
+                    # For environments without normalized score (e.g., MetaWorld)
+                    last_10_performance.append(ep_reward_mean)
+                    self.logger.logkv("eval/episode_reward", ep_reward_mean)
+                    self.logger.logkv("eval/episode_reward_std", ep_reward_std)
+                
+                # Log success rate for MetaWorld environments
+                if "eval/episode_success" in eval_info:
+                    ep_success_mean = np.mean(eval_info["eval/episode_success"]) * 100  # Convert to percentage
+                    ep_success_std = np.std(eval_info["eval/episode_success"]) * 100
+                    self.logger.logkv("eval/episode_success", ep_success_mean)
+                    self.logger.logkv("eval/episode_success_std", ep_success_std)
+                
+                self.logger.logkv("eval/episode_length", ep_length_mean)
+                self.logger.logkv("eval/episode_length_std", ep_length_std)
+
             self.logger.set_timestep(num_timesteps)
             self.logger.dumpkvs()
-        
+    
             # save checkpoint
             torch.save(self.policy.state_dict(), os.path.join(self.logger.checkpoint_dir, "policy.pth"))
 

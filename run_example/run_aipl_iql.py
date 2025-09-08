@@ -52,6 +52,7 @@ def get_args():
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--pref_batch_size", type=int, default=8)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--eval_freq", type=int, default=1)
 
     return parser.parse_args()
 
@@ -214,7 +215,8 @@ def train(args=get_args()):
         eval_episodes=args.eval_episodes,
         lr_scheduler=lr_scheduler,
         pref_buffer=pref_buffer,
-        pref_batch_size=args.pref_batch_size
+        pref_batch_size=args.pref_batch_size,
+        eval_freq=args.eval_freq
     )
 
     # train

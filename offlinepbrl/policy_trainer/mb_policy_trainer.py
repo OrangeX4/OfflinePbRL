@@ -29,7 +29,8 @@ class MBPolicyTrainer:
         real_ratio: float = 0.05,
         eval_episodes: int = 10,
         lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
-        dynamics_update_freq: int = 0
+        dynamics_update_freq: int = 0,
+        eval_freq: int = 1,
     ) -> None:
         self.policy = policy
         self.eval_env = eval_env
@@ -47,6 +48,7 @@ class MBPolicyTrainer:
         self._real_ratio = real_ratio
         self._eval_episodes = eval_episodes
         self.lr_scheduler = lr_scheduler
+        self._eval_freq = eval_freq
 
     def train(self) -> Dict[str, float]:
         start_time = time.time()
@@ -94,19 +96,37 @@ class MBPolicyTrainer:
                 self.lr_scheduler.step()
             
             # evaluate current policy
-            eval_info = self._evaluate()
-            ep_reward_mean, ep_reward_std = np.mean(eval_info["eval/episode_reward"]), np.std(eval_info["eval/episode_reward"])
-            ep_length_mean, ep_length_std = np.mean(eval_info["eval/episode_length"]), np.std(eval_info["eval/episode_length"])
-            norm_ep_rew_mean = self.eval_env.get_normalized_score(ep_reward_mean) * 100
-            norm_ep_rew_std = self.eval_env.get_normalized_score(ep_reward_std) * 100
-            last_10_performance.append(norm_ep_rew_mean)
-            self.logger.logkv("eval/normalized_episode_reward", norm_ep_rew_mean)
-            self.logger.logkv("eval/normalized_episode_reward_std", norm_ep_rew_std)
-            self.logger.logkv("eval/episode_length", ep_length_mean)
-            self.logger.logkv("eval/episode_length_std", ep_length_std)
+            if e % self._eval_freq == 0:
+                eval_info = self._evaluate()
+                ep_reward_mean, ep_reward_std = np.mean(eval_info["eval/episode_reward"]), np.std(eval_info["eval/episode_reward"])
+                ep_length_mean, ep_length_std = np.mean(eval_info["eval/episode_length"]), np.std(eval_info["eval/episode_length"])
+                
+                # Check if environment has normalized score method (D4RL environments)
+                if hasattr(self.eval_env, 'get_normalized_score'):
+                    norm_ep_rew_mean = self.eval_env.get_normalized_score(ep_reward_mean) * 100
+                    norm_ep_rew_std = self.eval_env.get_normalized_score(ep_reward_std) * 100
+                    last_10_performance.append(norm_ep_rew_mean)
+                    self.logger.logkv("eval/normalized_episode_reward", norm_ep_rew_mean)
+                    self.logger.logkv("eval/normalized_episode_reward_std", norm_ep_rew_std)
+                else:
+                    # For environments without normalized score (e.g., MetaWorld)
+                    last_10_performance.append(ep_reward_mean)
+                    self.logger.logkv("eval/episode_reward", ep_reward_mean)
+                    self.logger.logkv("eval/episode_reward_std", ep_reward_std)
+                
+                # Log success rate for MetaWorld environments
+                if "eval/episode_success" in eval_info:
+                    ep_success_mean = np.mean(eval_info["eval/episode_success"]) * 100  # Convert to percentage
+                    ep_success_std = np.std(eval_info["eval/episode_success"]) * 100
+                    self.logger.logkv("eval/episode_success", ep_success_mean)
+                    self.logger.logkv("eval/episode_success_std", ep_success_std)
+                
+                self.logger.logkv("eval/episode_length", ep_length_mean)
+                self.logger.logkv("eval/episode_length_std", ep_length_std)
+
             self.logger.set_timestep(num_timesteps)
             self.logger.dumpkvs(exclude=["dynamics_training_progress"])
-        
+            
             # save checkpoint
             torch.save(self.policy.state_dict(), os.path.join(self.logger.checkpoint_dir, "policy.pth"))
 
@@ -123,24 +143,66 @@ class MBPolicyTrainer:
         eval_ep_info_buffer = []
         num_episodes = 0
         episode_reward, episode_length = 0, 0
+        episode_success = 0  # Track success for MetaWorld environments
 
         while num_episodes < self._eval_episodes:
             action = self.policy.select_action(obs.reshape(1, -1), deterministic=True)
-            next_obs, reward, terminal, _ = self.eval_env.step(action.flatten())
+            next_obs, reward, terminal, info = self.eval_env.step(action.flatten())
             episode_reward += reward
             episode_length += 1
+            
+            # Track success for MetaWorld environments
+            # Check for MetaWorld environment types
+            is_metaworld = False
+            try:
+                # Check environment class names for MetaWorld indicators
+                env_to_check = self.eval_env
+                while hasattr(env_to_check, '_wrapped_env') or hasattr(env_to_check, 'wrapped_env') or hasattr(env_to_check, 'env'):
+                    if hasattr(env_to_check, '_wrapped_env'):
+                        env_to_check = env_to_check._wrapped_env
+                    elif hasattr(env_to_check, 'wrapped_env'):
+                        env_to_check = env_to_check.wrapped_env
+                    elif hasattr(env_to_check, 'env'):
+                        env_to_check = env_to_check.env
+                    else:
+                        break
+                
+                env_name = str(type(env_to_check).__name__)
+                if "metaworld" in env_name.lower() or "sawyer" in env_name.lower() or "box" in env_name.lower():
+                    is_metaworld = True
+            except:
+                # Fallback: check if task name contains metaworld
+                if hasattr(self, '_task_name') and "metaworld" in str(getattr(self, '_task_name', '')).lower():
+                    is_metaworld = True
+            
+            if is_metaworld and info and "success" in info:
+                episode_success = max(episode_success, info["success"])
 
             obs = next_obs
 
             if terminal:
-                eval_ep_info_buffer.append(
-                    {"episode_reward": episode_reward, "episode_length": episode_length}
-                )
+                episode_info = {
+                    "episode_reward": episode_reward, 
+                    "episode_length": episode_length
+                }
+                
+                # Add success rate for MetaWorld environments
+                if is_metaworld:
+                    episode_info["episode_success"] = episode_success
+                    
+                eval_ep_info_buffer.append(episode_info)
                 num_episodes +=1
                 episode_reward, episode_length = 0, 0
+                episode_success = 0
                 obs = self.eval_env.reset()
         
-        return {
+        result = {
             "eval/episode_reward": [ep_info["episode_reward"] for ep_info in eval_ep_info_buffer],
             "eval/episode_length": [ep_info["episode_length"] for ep_info in eval_ep_info_buffer]
         }
+        
+        # Add success rate if available
+        if eval_ep_info_buffer and "episode_success" in eval_ep_info_buffer[0]:
+            result["eval/episode_success"] = [ep_info["episode_success"] for ep_info in eval_ep_info_buffer]
+        
+        return result

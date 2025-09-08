@@ -60,6 +60,7 @@ def get_args():
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--eval_freq", type=int, default=5)
     parser.add_argument("--pref_batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
@@ -205,6 +206,7 @@ def train(args=get_args()):
         lr_scheduler=lr_scheduler,
         pref_buffer=pref_buffer,
         pref_batch_size=args.pref_batch_size,
+        eval_freq=args.eval_freq,
     )
 
     # train
