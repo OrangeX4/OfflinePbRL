@@ -238,7 +238,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs('metaworld', args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
