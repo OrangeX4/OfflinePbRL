@@ -3,6 +3,7 @@ import torch.nn as nn
 from typing import Dict, Any, Optional, Union
 import numpy as np
 
+from offlinepbrl.modules.reward_module import BaseRewardModel
 from offlinepbrl.policy.preference.bt import BTWrapper
 
 
@@ -20,7 +21,7 @@ class AdversarialBTWrapper(BTWrapper):
     def __init__(
         self,
         base_policy: Optional[Any] = None,
-        reward_model: nn.Module = None,
+        reward_model: BaseRewardModel = None,
         reward_model_optim: torch.optim.Optimizer = None,
         reward_reg: float = 0.1,
         reward_bias: float = 0.5,
@@ -53,7 +54,7 @@ class AdversarialBTWrapper(BTWrapper):
         # --- Step A: Policy Optimization (max step) ---
         if self._base_learn is not None and should_train_policy:
             with torch.no_grad():
-                replay_rewards = self.select_reward(replay_batch["observations"], replay_batch["actions"])
+                replay_rewards = self.reward_model.select_reward(replay_batch["observations"], replay_batch["actions"])
                 replay_batch["rewards"] = replay_rewards
             base_result = self._base_learn(replay_batch)
             result.update(base_result)
@@ -70,8 +71,8 @@ class AdversarialBTWrapper(BTWrapper):
         pref_action_1 = pref_batch["action_1"][:, :-1].reshape(F_B*F_S, -1)
         pref_action_2 = pref_batch["action_2"][:, :-1].reshape(F_B*F_S, -1)
         
-        reward_1 = self.select_reward(pref_obs_1, pref_action_1).reshape(F_B, F_S)
-        reward_2 = self.select_reward(pref_obs_2, pref_action_2).reshape(F_B, F_S)
+        reward_1 = self.reward_model.select_reward(pref_obs_1, pref_action_1).reshape(F_B, F_S)
+        reward_2 = self.reward_model.select_reward(pref_obs_2, pref_action_2).reshape(F_B, F_S)
         
         logits = reward_2.sum(dim=-1) - reward_1.sum(dim=-1)
         labels = pref_batch["label"][:, 1].float()
@@ -83,7 +84,7 @@ class AdversarialBTWrapper(BTWrapper):
         # We want to minimize the policy's expected return.
         # We approximate V(pi) by the average reward on the replay buffer,
         # as seen by the current reward model.
-        replay_rewards_adv = self.select_reward(replay_batch["observations"], replay_batch["actions"])
+        replay_rewards_adv = self.reward_model.select_reward(replay_batch["observations"], replay_batch["actions"])
         adversarial_loss = replay_rewards_adv.mean() # This is our approximation of V(pi, R_theta)
         
         # 3. Total reward model loss

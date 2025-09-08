@@ -3,6 +3,8 @@ import torch.nn as nn
 from typing import Dict, Any, Optional, Union
 import numpy as np
 
+from offlinepbrl.modules.reward_module import BaseRewardModel
+
 
 def gaussian_cdf(x):
     """Gaussian cumulative distribution function"""
@@ -17,7 +19,7 @@ class GaussianTMWrapper:
     def __init__(
         self,
         base_policy: Optional[Any] = None,
-        reward_model: nn.Module = None,
+        reward_model: BaseRewardModel = None,
         reward_model_optim: torch.optim.Optimizer = None,
         reward_reg: float = 0.0,
         reward_ent_reg: float = 0.1,
@@ -40,7 +42,6 @@ class GaussianTMWrapper:
         if base_policy is not None:
             # Store original learn method before copying attributes
             original_learn = self.learn
-            original_select_reward = self.select_reward
             
             # Copy all attributes from base policy
             self.__dict__.update(base_policy.__dict__)
@@ -49,25 +50,8 @@ class GaussianTMWrapper:
             # Restore our learn method and store base learn method
             self.learn = original_learn
             self._base_learn = base_policy.learn
-            self.select_reward = original_select_reward
         else:
             self._base_learn = None
-
-    def select_reward(
-        self,
-        obs: Union[np.ndarray, torch.Tensor],
-        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
-    ) -> torch.Tensor:
-        """Select reward using the reward model (returns mean only for policy learning)"""
-        if hasattr(self.reward_model, 'select_reward'):
-            return self.reward_model.select_reward(obs, actions)
-        else:
-            # For Gaussian reward model, return only the mean component
-            output = self.reward_model(obs, actions)
-            if output.shape[-1] == 2:  # mean and logvar
-                return output[..., 0:1]  # return mean only
-            else:
-                return output
 
     def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         replay_batch, pref_batch = batch["replay"], batch["pref"]
@@ -180,7 +164,7 @@ class GaussianTMWrapper:
         if self._base_learn is not None and should_train_policy:
             # Replace rewards in replay_batch with select_reward results
             with torch.no_grad():
-                replay_rewards = self.select_reward(replay_batch["observations"], replay_batch["actions"])
+                replay_rewards = self.reward_model.select_reward(replay_batch["observations"], replay_batch["actions"])
                 replay_batch["rewards"] = replay_rewards
             base_result = self._base_learn(replay_batch)
             result.update(base_result)

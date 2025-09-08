@@ -5,6 +5,7 @@ import gym
 
 from torch.nn import functional as F
 from typing import Dict, Union, Tuple
+from offlinepbrl.modules.reward_module import BaseRewardModel
 from offlinepbrl.policy import SACPolicy
 
 
@@ -18,7 +19,7 @@ class CPRLPolicy(SACPolicy):
         actor: nn.Module,
         critic1: nn.Module,
         critic2: nn.Module,
-        reward_model: nn.Module,
+        reward_model: BaseRewardModel,
         actor_optim: torch.optim.Optimizer,
         critic1_optim: torch.optim.Optimizer,
         critic2_optim: torch.optim.Optimizer,

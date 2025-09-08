@@ -28,6 +28,7 @@ class MFPolicyTrainer:
         lr_scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
         pref_buffer: Optional[PrefBuffer] = None,
         pref_batch_size: Optional[int] = None,
+        pref_batch_num: Optional[int] = None,
     ) -> None:
         self.policy = policy
         self.eval_env = eval_env
@@ -35,6 +36,7 @@ class MFPolicyTrainer:
         self.logger = logger
         self.pref_buffer = pref_buffer
         self.pref_batch_size = pref_batch_size if pref_batch_size is not None else batch_size
+        self.pref_batch_num = pref_batch_num
 
         self._epoch = epoch
         self._step_per_epoch = step_per_epoch
@@ -57,11 +59,18 @@ class MFPolicyTrainer:
                 # Sample from both buffers if preference buffer is available
                 if self.pref_buffer is not None:
                     replay_batch = self.buffer.sample(self._batch_size)
-                    preference_batch = self.pref_buffer.sample(self.pref_batch_size)
-                    batch = {
-                        "replay": replay_batch,
-                        "pref": preference_batch,
-                    }
+                    if self.pref_batch_num is not None:
+                        preference_batches = [self.pref_buffer.sample(self.pref_batch_size) for _ in range(self.pref_batch_num)]
+                        batch = {
+                            "replay": replay_batch,
+                            "pref": preference_batches,
+                        }
+                    else:
+                        preference_batch = self.pref_buffer.sample(self.pref_batch_size)
+                        batch = {
+                            "replay": replay_batch,
+                            "pref": preference_batch,
+                        }
                 else:
                     batch = self.buffer.sample(self._batch_size)
                 

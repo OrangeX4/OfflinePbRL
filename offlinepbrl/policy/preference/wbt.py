@@ -3,6 +3,8 @@ import torch.nn as nn
 from typing import Callable, Dict, Any, Optional, Union
 import numpy as np
 
+from offlinepbrl.modules.reward_module import BaseRewardModel
+
 
 class WeightedBTWrapper:
     """
@@ -12,7 +14,7 @@ class WeightedBTWrapper:
     def __init__(
         self,
         base_policy: Optional[Any] = None,
-        reward_model: nn.Module = None,
+        reward_model: BaseRewardModel = None,
         reward_model_optim: torch.optim.Optimizer = None,
         reward_reg: float = 0.0,
         get_reward_std: Callable = None,
@@ -36,7 +38,6 @@ class WeightedBTWrapper:
         if base_policy is not None:
             # Store original learn method before copying attributes
             original_learn = self.learn
-            original_select_reward = self.select_reward
             
             # Copy all attributes from base policy
             self.__dict__.update(base_policy.__dict__)
@@ -45,20 +46,8 @@ class WeightedBTWrapper:
             # Restore our learn method and store base learn method
             self.learn = original_learn
             self._base_learn = base_policy.learn
-            self.select_reward = original_select_reward
         else:
             self._base_learn = None
-
-    def select_reward(
-        self,
-        obs: Union[np.ndarray, torch.Tensor],
-        actions: Optional[Union[np.ndarray, torch.Tensor]] = None
-    ) -> torch.Tensor:
-        """Select reward using the reward model"""
-        if hasattr(self.reward_model, 'select_reward'):
-            return self.reward_model.select_reward(obs, actions)
-        else:
-            return self.reward_model(obs, actions)
 
     def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         replay_batch, pref_batch = batch["replay"], batch["pref"]
@@ -87,8 +76,8 @@ class WeightedBTWrapper:
             pref_action_1 = pref_batch["action_1"][:, :-1].reshape(F_B*F_S, -1)
             pref_action_2 = pref_batch["action_2"][:, :-1].reshape(F_B*F_S, -1)
             
-            reward_1 = self.select_reward(pref_obs_1, pref_action_1).reshape(F_B, F_S)
-            reward_2 = self.select_reward(pref_obs_2, pref_action_2).reshape(F_B, F_S)
+            reward_1 = self.reward_model.select_reward(pref_obs_1, pref_action_1).reshape(F_B, F_S)
+            reward_2 = self.reward_model.select_reward(pref_obs_2, pref_action_2).reshape(F_B, F_S)
             reward_std_1 = self.get_reward_std(pref_obs_1, pref_action_1).reshape(F_B, F_S)
             reward_std_2 = self.get_reward_std(pref_obs_2, pref_action_2).reshape(F_B, F_S)
 
@@ -143,7 +132,7 @@ class WeightedBTWrapper:
         if self._base_learn is not None and should_train_policy:
             # Replace rewards in replay_batch with select_reward results
             with torch.no_grad():
-                replay_rewards = self.select_reward(replay_batch["observations"], replay_batch["actions"])
+                replay_rewards = self.reward_model.select_reward(replay_batch["observations"], replay_batch["actions"])
                 replay_batch["rewards"] = replay_rewards
             base_result = self._base_learn(replay_batch)
             result.update(base_result)

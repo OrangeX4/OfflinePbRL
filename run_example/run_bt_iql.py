@@ -10,7 +10,7 @@ import torch
 
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
-from offlinepbrl.modules.reward_module import RewardModel
+from offlinepbrl.modules.reward_module import RewardModel, EnsembleRewardModel
 from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
@@ -45,6 +45,7 @@ def get_args():
     parser.add_argument("--reward_reg", type=float, default=0.0)
     parser.add_argument("--rm_stop_epoch", type=int, default=200)
     parser.add_argument("--policy_start_epoch", type=int, default=200)
+    parser.add_argument("--ensemble_num", type=int, default=3)
     
     parser.add_argument("--epoch", type=int, default=1200)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
@@ -132,13 +133,22 @@ def train(args=get_args()):
     critic_q1 = Critic(critic_q1_backbone, args.device)
     critic_q2 = Critic(critic_q2_backbone, args.device)
     critic_v = Critic(critic_v_backbone, args.device)
-    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    
+    if args.ensemble_num > 1:
+        base_reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+        reward_model = EnsembleRewardModel(base_reward_model, args.ensemble_num, device=args.device)
+    else:
+        reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic_q1_optim = torch.optim.Adam(critic_q1.parameters(), lr=args.critic_q_lr)
     critic_q2_optim = torch.optim.Adam(critic_q2.parameters(), lr=args.critic_q_lr)
     critic_v_optim = torch.optim.Adam(critic_v.parameters(), lr=args.critic_v_lr)
-    reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
+    
+    if args.ensemble_num > 1:
+        reward_model_optim = [torch.optim.Adam(member.parameters(), lr=args.reward_model_lr) for member in reward_model.members]
+    else:
+        reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
 
     if args.lr_decay:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
@@ -218,7 +228,8 @@ def train(args=get_args()):
         eval_episodes=args.eval_episodes,
         lr_scheduler=lr_scheduler,
         pref_buffer=pref_buffer,
-        pref_batch_size=args.pref_batch_size
+        pref_batch_size=args.pref_batch_size,
+        pref_batch_num=args.ensemble_num if args.ensemble_num > 1 else None,
     )
 
     # train
