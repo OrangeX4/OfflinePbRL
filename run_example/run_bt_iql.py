@@ -120,7 +120,6 @@ def train(args=get_args()):
     critic_q1_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
-    reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     
     dist = DiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
@@ -135,9 +134,14 @@ def train(args=get_args()):
     critic_v = Critic(critic_v_backbone, args.device)
     
     if args.ensemble_num > 1:
-        base_reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
-        reward_model = EnsembleRewardModel(base_reward_model, args.ensemble_num, device=args.device)
+        reward_models = []
+        for _ in range(args.ensemble_num):
+            reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
+            reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+            reward_models.append(reward_model)
+        reward_model = EnsembleRewardModel(reward_models, device=args.device)
     else:
+        reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
         reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)

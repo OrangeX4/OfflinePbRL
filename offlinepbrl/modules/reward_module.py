@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Union, Optional
+from typing import List, Union, Optional
 from abc import ABC, abstractmethod
 import copy
 from offlinepbrl.nets.activation import get_activation
@@ -125,32 +125,15 @@ class EnsembleRewardModel(BaseRewardModel):
     
     def __init__(
         self, 
-        base_reward_model: BaseRewardModel, 
-        ensemble_num: int,
+        reward_models: List[BaseRewardModel], 
         device: str = "cpu"
     ) -> None:
         super().__init__()
         
         self.device = torch.device(device)
-        self.ensemble_num = ensemble_num
-        
-        # Create ensemble using random copies
-        self.members = nn.ModuleList([
-            self._create_random_copy(base_reward_model) 
-            for _ in range(ensemble_num)
-        ])
-    
-    def _create_random_copy(self, base_model: BaseRewardModel) -> BaseRewardModel:
-        """Create a random copy of the base model"""
-        model_copy = copy.deepcopy(base_model)
-        random_state_dict = {
-            k: torch.randn_like(v)
-            for k, v in base_model.state_dict().items()
-        }
-        model_copy.load_state_dict(random_state_dict)
-        model_copy.to(self.device)
-        return model_copy
-    
+        self.members = nn.ModuleList(reward_models)
+        self.ensemble_num = len(reward_models)
+
     def forward(
         self,
         obs: Union[np.ndarray, torch.Tensor],
