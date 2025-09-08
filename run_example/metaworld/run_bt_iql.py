@@ -11,7 +11,7 @@ import torch
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
 from offlinepbrl.modules.reward_module import RewardModel, EnsembleRewardModel
-from offlinepbrl.utils.load_metaworld_dataset import load_metaworld_mr_dataset, collect_feedback
+from offlinepbrl.utils.load_metaworld_dataset import load_metaworld_mr_dataset, load_metaworld_rlhf_dataset
 from offlinepbrl.env.util import make_metaworld_env
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
@@ -26,8 +26,8 @@ expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="bt_iql_metaworld")
-    parser.add_argument("--task", type=str, default="metaworld_box-close-v2")
+    parser.add_argument("--algo_name", type=str, default="bt_iql")
+    parser.add_argument("--task", type=str, default="box-close-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
     parser.add_argument("--actor_lr", type=float, default=3e-4)
@@ -95,71 +95,15 @@ def train(args=get_args()):
     
     # create preference buffer
     traj_total = len(dataset["observations"]) // 500
-    feedback = collect_feedback(
-        dataset, 
-        traj_total, 
-        args.feedback_num, 
-        args.segment_size, 
-        args.feedback_type, 
-        args.threshold, 
+    rlhf_dataset = load_metaworld_rlhf_dataset(
+        dataset,
+        traj_total,
+        args.feedback_num,
+        args.segment_size,
+        args.feedback_type,
+        args.threshold,
         args.noise
     )
-    
-    # Convert feedback format to what the framework expects
-    idx_st_1 = []
-    idx_st_2 = []
-    labels = []
-    # construct the preference pairs from multiple_ranked_list
-    for single_ranked_list in feedback:
-        for i in range(len(single_ranked_list)):
-            for j in range(i + 1, len(single_ranked_list)):
-                group_i = single_ranked_list[i] 
-                group_j = single_ranked_list[j]
-                for item_i in group_i:
-                    for item_j in group_j:
-                        idx_st_1.append(item_i[0])
-                        idx_st_2.append(item_j[0])
-                        labels.append([0, 1])  # group_j (later in list) is preferred over group_i
-    labels = np.array(labels)
-    
-    # Convert to segment indices
-    idx_1 = [[j for j in range(i, i + args.segment_size)] for i in idx_st_1]
-    idx_2 = [[j for j in range(i, i + args.segment_size)] for i in idx_st_2]
-    
-    obs_1_s = dataset["observations"][np.array(idx_1)]
-    action_1_s = dataset["actions"][np.array(idx_1)]
-    obs_2_s = dataset["observations"][np.array(idx_2)]
-    action_2_s = dataset["actions"][np.array(idx_2)]
-    
-    # Convert to format expected by PrefBuffer
-    # Data should be in format [num_pairs, sequence_length, feature_dim]
-    num_pairs = len(obs_1_s)
-    
-    # Create timestep arrays (1 to segment_size for each trajectory)
-    timesteps_1 = np.tile(np.arange(1, args.segment_size + 1), (num_pairs, 1))
-    timesteps_2 = np.tile(np.arange(1, args.segment_size + 1), (num_pairs, 1))
-    
-    # Create start indices (marks beginning of each trajectory)
-    start_indices_1 = np.arange(num_pairs) * args.segment_size
-    start_indices_2 = np.arange(num_pairs) * args.segment_size
-    
-    # Create dummy rewards (will be replaced by reward model)
-    rewards_1 = np.zeros((num_pairs, args.segment_size))
-    rewards_2 = np.zeros((num_pairs, args.segment_size))
-    
-    rlhf_dataset = {
-        "observations": obs_1_s,
-        "actions": action_1_s,
-        "rewards": rewards_1,
-        "timestep": timesteps_1,
-        "start_indices": start_indices_1,
-        "observations_2": obs_2_s,
-        "actions_2": action_2_s,
-        "rewards_2": rewards_2,
-        "timestep_2": timesteps_2,
-        "start_indices_2": start_indices_2,
-        "labels": labels
-    }
 
     pref_buffer = PrefBuffer(
         buffer_size=len(rlhf_dataset["observations"]),
@@ -238,7 +182,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs('metaworld', args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs('metaworld/' + args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",

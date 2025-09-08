@@ -436,7 +436,7 @@ def load_metaworld_mr_dataset(env_name: str, data_quality: float = 1.0, human: b
             terminals: An N-dim boolean array of "done" or episode termination flags.
     """
     if base_path is None:
-        base_path = os.path.join(os.path.dirname(__file__), "../data/metaworld/MetaWorld_medium-replay/" + env_name.split("_")[1])
+        base_path = os.path.join(os.path.dirname(__file__), "../data/metaworld/MetaWorld_medium-replay/" + env_name)
     
     if human == False:
         dataset = dict()
@@ -509,7 +509,7 @@ def load_metaworld_me_dataset(env_name: str, data_quality: float = 1.0, base_pat
             terminals: An N-dim boolean array of "done" or episode termination flags.
     """
     if base_path is None:
-        base_path = os.path.join(os.path.dirname(__file__), "../data/metaworld/MetaWorld_medium-expert/" + env_name.split("_")[1])
+        base_path = os.path.join(os.path.dirname(__file__), "../data/metaworld/MetaWorld_medium-expert/" + env_name)
     
     load_dataset = np.load(os.path.join(base_path, "trajectory.npz"))
     dataset = {key: load_dataset[key] for key in load_dataset.keys()}
@@ -541,4 +541,108 @@ def load_metaworld_me_dataset(env_name: str, data_quality: float = 1.0, base_pat
         "next_observations": dataset["next_states"].astype(np.float32).reshape(-1,500,state_dim)[idx].reshape(-1,state_dim),
         "rewards": dataset["rewards"].astype(np.float32).reshape(N,500,-1)[idx].reshape(-1),
         "terminals": dataset["dones"].astype(bool).reshape(N,500,-1)[idx].reshape(-1),
+    }
+
+
+def load_metaworld_rlhf_dataset(
+    dataset, 
+    traj_total: int,
+    feedback_num: int = 1000, 
+    segment_size: int = 25, 
+    feedback_type: str = "RLT", 
+    threshold: float = 0.5, 
+    noise: float = 0.0
+):
+    """
+    Build preference dataset from MetaWorld dataset for preference-based RL training.
+    
+    Args:
+        dataset: The main dataset containing observations, actions, etc.
+        traj_total: Total number of trajectories in the dataset
+        feedback_num: Number of preference pairs to generate
+        segment_size: Length of trajectory segments for preference comparison
+        feedback_type: Type of feedback collection ("RLT" or "SeqRank")
+        threshold: Threshold for considering preferences as equal
+        noise: Noise level for preference labels
+        
+    Returns:
+        A dictionary containing preference data in PrefBuffer format:
+            observations: [num_pairs, segment_size, obs_dim]
+            actions: [num_pairs, segment_size, action_dim]
+            rewards: [num_pairs, segment_size] (dummy rewards)
+            timestep: [num_pairs, segment_size]
+            start_indices: [num_pairs]
+            observations_2: [num_pairs, segment_size, obs_dim]
+            actions_2: [num_pairs, segment_size, action_dim]
+            rewards_2: [num_pairs, segment_size] (dummy rewards)
+            timestep_2: [num_pairs, segment_size]
+            start_indices_2: [num_pairs]
+            labels: [num_pairs, 2] (one-hot preference labels)
+    """
+    # Collect feedback using the existing function
+    feedback = collect_feedback(
+        dataset, 
+        traj_total, 
+        feedback_num, 
+        segment_size, 
+        feedback_type, 
+        threshold, 
+        noise
+    )
+    
+    # Convert feedback format to what the framework expects
+    idx_st_1 = []
+    idx_st_2 = []
+    labels = []
+    
+    # construct the preference pairs from multiple_ranked_list
+    for single_ranked_list in feedback:
+        for i in range(len(single_ranked_list)):
+            for j in range(i + 1, len(single_ranked_list)):
+                group_i = single_ranked_list[i] 
+                group_j = single_ranked_list[j]
+                for item_i in group_i:
+                    for item_j in group_j:
+                        idx_st_1.append(item_i[0])
+                        idx_st_2.append(item_j[0])
+                        labels.append([0, 1])  # group_j (later in list) is preferred over group_i
+    labels = np.array(labels)
+    
+    # Convert to segment indices
+    idx_1 = [[j for j in range(i, i + segment_size)] for i in idx_st_1]
+    idx_2 = [[j for j in range(i, i + segment_size)] for i in idx_st_2]
+    
+    obs_1_s = dataset["observations"][np.array(idx_1)]
+    action_1_s = dataset["actions"][np.array(idx_1)]
+    obs_2_s = dataset["observations"][np.array(idx_2)]
+    action_2_s = dataset["actions"][np.array(idx_2)]
+    
+    # Convert to format expected by PrefBuffer
+    # Data should be in format [num_pairs, sequence_length, feature_dim]
+    num_pairs = len(obs_1_s)
+    
+    # Create timestep arrays (1 to segment_size for each trajectory)
+    timesteps_1 = np.tile(np.arange(1, segment_size + 1), (num_pairs, 1))
+    timesteps_2 = np.tile(np.arange(1, segment_size + 1), (num_pairs, 1))
+    
+    # Create start indices (marks beginning of each trajectory)
+    start_indices_1 = np.arange(num_pairs) * segment_size
+    start_indices_2 = np.arange(num_pairs) * segment_size
+    
+    # Create dummy rewards (will be replaced by reward model)
+    rewards_1 = np.zeros((num_pairs, segment_size))
+    rewards_2 = np.zeros((num_pairs, segment_size))
+    
+    return {
+        "observations": obs_1_s,
+        "actions": action_1_s,
+        "rewards": rewards_1,
+        "timestep": timesteps_1,
+        "start_indices": start_indices_1,
+        "observations_2": obs_2_s,
+        "actions_2": action_2_s,
+        "rewards_2": rewards_2,
+        "timestep_2": timesteps_2,
+        "start_indices_2": start_indices_2,
+        "labels": labels
     }

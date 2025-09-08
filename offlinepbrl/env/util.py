@@ -6,7 +6,6 @@ from offlinepbrl.env.wrappers import NormalizedBoxEnv
 
 
 def make_metaworld_env(env_name, seed):
-    env_name = env_name.replace("metaworld_", "")
     if env_name in _env_dict.ALL_V2_ENVIRONMENTS:
         env_cls = _env_dict.ALL_V2_ENVIRONMENTS[env_name]
     else:
