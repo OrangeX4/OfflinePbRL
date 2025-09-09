@@ -28,6 +28,7 @@ from offlinepbrl.policy.preference.bt import BTWrapper
 from offlinepbrl.policy.preference.abt import AdversarialBTWrapper
 from offlinepbrl.policy.preference.wbt import WeightedBTWrapper
 from offlinepbrl.policy.preference.gtm import GaussianTMWrapper
+from offlinepbrl.policy.preference.appo import APPOPolicy
 
 __all__ = [
     "BasePolicy",
@@ -52,4 +53,5 @@ __all__ = [
     "BTWrapper",
     "AdversarialBTWrapper",
     "GaussianTMWrapper",
+    "APPOPolicy",
 ]

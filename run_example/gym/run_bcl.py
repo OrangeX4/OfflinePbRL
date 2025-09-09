@@ -9,28 +9,29 @@ import torch
 
 
 from offlinepbrl.nets import MLP
-from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian
+from offlinepbrl.modules import ActorProb, Critic, RewardModel, TanhDiagGaussian
 from offlinepbrl.utils.load_dataset import load_rlhf_dataset, qlearning_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import IPLCQLPolicy
+from offlinepbrl.policy import BCLPolicy
 
 """
-suggested hypers
-cql_weight=5.0, temperature=1.0 for all D4RL-Gym tasks
-IPL specific: reward_reg=0.5, replay weights for balancing
+Bidirectional Conservative Learning (BCL)
+Combines CQL with bidirectional reward learning through Soft Bellman Operator
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="ipl_cql")
+    parser.add_argument("--domain", type=str, default="gym")
+    parser.add_argument("--algo_name", type=str, default="bcl")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
     parser.add_argument("--actor_lr", type=float, default=1e-4)
     parser.add_argument("--critic_lr", type=float, default=3e-4)
+    parser.add_argument("--reward_model_lr", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
@@ -43,16 +44,15 @@ def get_args():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max_q_backup", type=bool, default=False)
     parser.add_argument("--deterministic_backup", type=bool, default=True)
-    parser.add_argument("--with_lagrange", type=bool, default=False)
+    parser.add_argument("--with_lagrange", type=bool, default=True)
     parser.add_argument("--lagrange_threshold", type=float, default=10.0)
     parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
     parser.add_argument("--num_repeat_actions", type=int, default=10)
     
-    # IPL specific parameters
-    parser.add_argument("--reward_reg", type=float, default=0.5)
-    parser.add_argument("--q_reg", type=float, default=0.0)
-    parser.add_argument("--reg_replay_weight", type=float, default=0.5)
-    parser.add_argument("--actor_replay_weight", type=float, default=0.5)
+    # Reward model specific parameters
+    parser.add_argument("--reward_activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
+    parser.add_argument("--reward_reg", type=float, default=0.0)
+    parser.add_argument("--reward_sync_weight", type=float, default=1.0)
     
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
@@ -65,52 +65,16 @@ def get_args():
     return parser.parse_args()
 
 
-def normalize_rewards(dataset):
-    terminals_float = np.zeros_like(dataset["rewards"])
-    for i in range(len(terminals_float) - 1):
-        if np.linalg.norm(dataset["observations"][i + 1] -
-                            dataset["next_observations"][i]
-                            ) > 1e-6 or dataset["terminals"][i] == 1.0:
-            terminals_float[i] = 1
-        else:
-            terminals_float[i] = 0
-
-    terminals_float[-1] = 1
-
-    # split_into_trajectories
-    trajs = [[]]
-    for i in range(len(dataset["observations"])):
-        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], dataset["rewards"][i], 1.0-dataset["terminals"][i],
-                        terminals_float[i], dataset["next_observations"][i]))
-        if terminals_float[i] == 1.0 and i + 1 < len(dataset["observations"]):
-            trajs.append([])
-    
-    def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
-
-        return episode_return
-
-    trajs.sort(key=compute_returns)
-
-    # normalize rewards
-    dataset["rewards"] /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
-    dataset["rewards"] *= 1000.0
-
-    return dataset
-
-
 def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
     rlhf_dataset = load_rlhf_dataset(env, dataset)
-    # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
+    
+    # Dataset preprocessing similar to CQL
     if 'antmaze' in args.task:
         dataset["rewards"] = (dataset["rewards"] - 0.5) * 4.0
-    if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
-        dataset = normalize_rewards(dataset)
+        
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
@@ -123,10 +87,12 @@ def train(args=get_args()):
     torch.backends.cudnn.deterministic = True
     env.seed(args.seed)
 
-    # create policy model
+    # create policy model - SAC style like CQL
     actor_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
     critic1_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     critic2_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
+    reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
+    
     dist = TanhDiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
         output_dim=args.action_dim,
@@ -137,16 +103,12 @@ def train(args=get_args()):
     actor = ActorProb(actor_backbone, dist, args.device)
     critic1 = Critic(critic1_backbone, args.device)
     critic2 = Critic(critic2_backbone, args.device)
+    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
-    for m in list(actor.modules()) + list(critic1.modules()) + list(critic2.modules()):
-        if isinstance(m, torch.nn.Linear):
-            # orthogonal initialization
-            torch.nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-            torch.nn.init.zeros_(m.bias)
-
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
+    reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
 
     if args.auto_alpha:
         target_entropy = args.target_entropy if args.target_entropy \
@@ -160,14 +122,16 @@ def train(args=get_args()):
     else:
         alpha = args.alpha
 
-    # create IPL-CQL policy
-    policy = IPLCQLPolicy(
+    # create BCL policy
+    policy = BCLPolicy(
         actor,
         critic1,
         critic2,
+        reward_model,
         actor_optim,
         critic1_optim,
         critic2_optim,
+        reward_model_optim,
         action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
@@ -181,9 +145,7 @@ def train(args=get_args()):
         cql_alpha_lr=args.cql_alpha_lr,
         num_repeart_actions=args.num_repeat_actions,
         reward_reg=args.reward_reg,
-        q_reg=args.q_reg,
-        reg_replay_weight=args.reg_replay_weight,
-        actor_replay_weight=args.actor_replay_weight,
+        reward_sync_weight=args.reward_sync_weight
     )
 
     # create replay buffer
@@ -210,7 +172,7 @@ def train(args=get_args()):
     pref_buffer.load_dataset(rlhf_dataset)
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",

@@ -16,18 +16,12 @@ from offlinepbrl.env.util import make_metaworld_env
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import BTWrapper, IQLPolicy
-
-"""
-suggested hypers
-expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
-"""
-
+from offlinepbrl.policy import BTWrapper, APPOPolicy
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", type=str, default="metaworld")
-    parser.add_argument("--algo_name", type=str, default="bt_iql")
+    parser.add_argument("--algo_name", type=str, default="bt_appo")
     parser.add_argument("--task", type=str, default="box-close-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -38,8 +32,8 @@ def get_args():
     parser.add_argument("--lr_decay", type=bool, default=True)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--expectile", type=float, default=0.7)
-    parser.add_argument("--temperature", type=float, default=3.0)
+    parser.add_argument("--lam", type=float, default=1e-3)
+    parser.add_argument("--alpha", type=float, default=0.2)
     
     # BT specific parameters
     parser.add_argument("--reward_model_lr", type=float, default=3e-4)
@@ -141,8 +135,8 @@ def train(args=get_args()):
     else:
         lr_scheduler = None
     
-    # create IQL policy
-    base_policy = IQLPolicy(
+    # create APPO policy
+    base_policy = APPOPolicy(
         actor,
         critic_q1,
         critic_q2,
@@ -154,8 +148,8 @@ def train(args=get_args()):
         action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
-        expectile=args.expectile,
-        temperature=args.temperature
+        alpha=args.alpha,
+        lam=args.lam,
     )
     
     # Wrap with BT

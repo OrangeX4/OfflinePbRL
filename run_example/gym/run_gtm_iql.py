@@ -10,21 +10,21 @@ import torch
 
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
-from offlinepbrl.utils.load_dataset import qlearning_dataset
-from offlinepbrl.buffer import ReplayBuffer
+from offlinepbrl.modules.reward_module import GaussianRewardModel
+from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
+from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import IQLPolicy
+from offlinepbrl.policy import GaussianTMWrapper, IQLPolicy
 
 """
-suggested hypers
-expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
+Gaussian Thurstone-Mosteller with IQL
 """
-
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="iql")
+    parser.add_argument("--domain", type=str, default="gym")
+    parser.add_argument("--algo_name", type=str, default="gtm_iql")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -37,10 +37,22 @@ def get_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--expectile", type=float, default=0.7)
     parser.add_argument("--temperature", type=float, default=3.0)
-    parser.add_argument("--epoch", type=int, default=1000)
+    
+    # Gaussian TM specific parameters
+    parser.add_argument("--reward_model_lr", type=float, default=3e-4)
+    parser.add_argument("--reward_activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
+    parser.add_argument("--reward_reg", type=float, default=0.0)
+    parser.add_argument("--reward_ent_reg", type=float, default=0.1)
+    parser.add_argument("--entropy_threshold", type=float, default=0.1)
+    parser.add_argument("--reg_type", type=str, default="transition", choices=["transition", "trajectory"])
+    parser.add_argument("--rm_stop_epoch", type=int, default=200)
+    parser.add_argument("--policy_start_epoch", type=int, default=200)
+    
+    parser.add_argument("--epoch", type=int, default=1200)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--pref_batch_size", type=int, default=8)
     parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
@@ -87,6 +99,8 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
+    rlhf_dataset = load_rlhf_dataset(env, dataset)
+    
     if 'antmaze' in args.task:
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
@@ -108,6 +122,8 @@ def train(args=get_args()):
     critic_q1_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
+    reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
+    
     dist = DiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
         output_dim=args.action_dim,
@@ -120,16 +136,14 @@ def train(args=get_args()):
     critic_q2 = Critic(critic_q2_backbone, args.device)
     critic_v = Critic(critic_v_backbone, args.device)
     
-    for m in list(actor.modules()) + list(critic_q1.modules()) + list(critic_q2.modules()) + list(critic_v.modules()):
-        if isinstance(m, torch.nn.Linear):
-            # orthogonal initialization
-            torch.nn.init.orthogonal_(m.weight, gain=np.sqrt(2))
-            torch.nn.init.zeros_(m.bias)
-
+    # Use Gaussian reward model for Thurstone-Mosteller learning
+    reward_model = GaussianRewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic_q1_optim = torch.optim.Adam(critic_q1.parameters(), lr=args.critic_q_lr)
     critic_q2_optim = torch.optim.Adam(critic_q2.parameters(), lr=args.critic_q_lr)
     critic_v_optim = torch.optim.Adam(critic_v.parameters(), lr=args.critic_v_lr)
+    reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
 
     if args.lr_decay:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
@@ -137,7 +151,7 @@ def train(args=get_args()):
         lr_scheduler = None
     
     # create IQL policy
-    policy = IQLPolicy(
+    base_policy = IQLPolicy(
         actor,
         critic_q1,
         critic_q2,
@@ -152,6 +166,19 @@ def train(args=get_args()):
         expectile=args.expectile,
         temperature=args.temperature
     )
+    
+    # Wrap with Gaussian TM
+    policy = GaussianTMWrapper(
+        base_policy=base_policy,
+        reward_model=reward_model,
+        reward_model_optim=reward_model_optim,
+        reward_reg=args.reward_reg,
+        reward_ent_reg=args.reward_ent_reg,
+        entropy_threshold=args.entropy_threshold,
+        reg_type=args.reg_type,
+        rm_stop_epoch=args.rm_stop_epoch,
+        policy_start_epoch=args.policy_start_epoch
+    )
 
     # create buffer
     buffer = ReplayBuffer(
@@ -164,8 +191,20 @@ def train(args=get_args()):
     )
     buffer.load_dataset(dataset)
 
+    # create preference buffer
+    pref_buffer = PrefBuffer(
+        buffer_size=len(rlhf_dataset["observations"]),
+        obs_shape=args.obs_shape,
+        obs_dtype=np.float32,
+        action_dim=args.action_dim,
+        action_dtype=np.float32,
+        max_traj_len=rlhf_dataset["observations"].shape[1],
+        device=args.device
+    )
+    pref_buffer.load_dataset(rlhf_dataset)
+
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -186,6 +225,8 @@ def train(args=get_args()):
         batch_size=args.batch_size,
         eval_episodes=args.eval_episodes,
         lr_scheduler=lr_scheduler,
+        pref_buffer=pref_buffer,
+        pref_batch_size=args.pref_batch_size,
         eval_freq=args.eval_freq
     )
 

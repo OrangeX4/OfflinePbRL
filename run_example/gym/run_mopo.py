@@ -39,6 +39,7 @@ walker2d-medium-expert-v2: rollout_length=1, penalty_coef=2.5
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--domain", type=str, default="gym")
     parser.add_argument("--algo_name", type=str, default="mopo")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=1)
@@ -185,7 +186,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args), record_params=["penalty_coef", "rollout_length"])
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["penalty_coef", "rollout_length"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",

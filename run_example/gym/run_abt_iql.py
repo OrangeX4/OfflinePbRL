@@ -1,21 +1,18 @@
 import argparse
 import random
-
+import numpy as np
+import torch
 import gym
 import d4rl
 
-import numpy as np
-import torch
-
-
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
-from offlinepbrl.modules.reward_module import RewardModel, EnsembleRewardModel
+from offlinepbrl.modules.reward_module import RewardModel
 from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import BTWrapper, IQLPolicy
+from offlinepbrl.policy import AdversarialBTWrapper, IQLPolicy
 
 """
 suggested hypers
@@ -25,7 +22,8 @@ expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="bt_iql")
+    parser.add_argument("--domain", type=str, default="gym")
+    parser.add_argument("--algo_name", type=str, default="abt_iql")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -39,20 +37,21 @@ def get_args():
     parser.add_argument("--expectile", type=float, default=0.7)
     parser.add_argument("--temperature", type=float, default=3.0)
     
-    # BT specific parameters
+    # ABT specific parameters
     parser.add_argument("--reward_model_lr", type=float, default=3e-4)
     parser.add_argument("--reward_activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
-    parser.add_argument("--reward_reg", type=float, default=0.0)
-    parser.add_argument("--rm_stop_epoch", type=int, default=200)
-    parser.add_argument("--policy_start_epoch", type=int, default=200)
-    parser.add_argument("--ensemble_num", type=int, default=3)
+    parser.add_argument("--reward_reg", type=float, default=0.1)
+    parser.add_argument("--reward_bias", type=float, default=0.5)
+    parser.add_argument("--adversarial_weight", type=float, default=0.1)
+    parser.add_argument("--rm_stop_epoch", type=int, default=None)
+    parser.add_argument("--policy_start_epoch", type=int, default=0)
     
-    parser.add_argument("--epoch", type=int, default=1200)
+    parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
-    parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--pref_batch_size", type=int, default=8)
+    parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     return parser.parse_args()
@@ -62,8 +61,7 @@ def normalize_rewards(dataset):
     terminals_float = np.zeros_like(dataset["rewards"])
     for i in range(len(terminals_float) - 1):
         if np.linalg.norm(dataset["observations"][i + 1] -
-                            dataset["next_observations"][i]
-                            ) > 1e-6 or dataset["terminals"][i] == 1.0:
+                          dataset["next_observations"][i]) > 1e-6:
             terminals_float[i] = 1
         else:
             terminals_float[i] = 0
@@ -73,17 +71,12 @@ def normalize_rewards(dataset):
     # split_into_trajectories
     trajs = [[]]
     for i in range(len(dataset["observations"])):
-        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], dataset["rewards"][i], 1.0-dataset["terminals"][i],
-                        terminals_float[i], dataset["next_observations"][i]))
-        if terminals_float[i] == 1.0 and i + 1 < len(dataset["observations"]):
+        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], dataset["rewards"][i], dataset["terminals"][i], terminals_float[i]))
+        if terminals_float[i] == 1 and i + 1 < len(dataset["observations"]):
             trajs.append([])
     
     def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
-
-        return episode_return
+        return sum(r for _, _, r, _, _ in traj)
 
     trajs.sort(key=compute_returns)
 
@@ -104,6 +97,7 @@ def train(args=get_args()):
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
         dataset = normalize_rewards(dataset)
+        
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
@@ -121,6 +115,7 @@ def train(args=get_args()):
     critic_q1_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
+    reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     
     dist = DiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
@@ -133,27 +128,13 @@ def train(args=get_args()):
     critic_q1 = Critic(critic_q1_backbone, args.device)
     critic_q2 = Critic(critic_q2_backbone, args.device)
     critic_v = Critic(critic_v_backbone, args.device)
-    
-    if args.ensemble_num > 1:
-        reward_models = []
-        for _ in range(args.ensemble_num):
-            reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
-            reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
-            reward_models.append(reward_model)
-        reward_model = EnsembleRewardModel(reward_models, device=args.device)
-    else:
-        reward_model_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
-        reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic_q1_optim = torch.optim.Adam(critic_q1.parameters(), lr=args.critic_q_lr)
     critic_q2_optim = torch.optim.Adam(critic_q2.parameters(), lr=args.critic_q_lr)
     critic_v_optim = torch.optim.Adam(critic_v.parameters(), lr=args.critic_v_lr)
-    
-    if args.ensemble_num > 1:
-        reward_model_optim = [torch.optim.Adam(member.parameters(), lr=args.reward_model_lr) for member in reward_model.members]
-    else:
-        reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
+    reward_model_optim = torch.optim.Adam(reward_model.parameters(), lr=args.reward_model_lr)
 
     if args.lr_decay:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
@@ -177,12 +158,14 @@ def train(args=get_args()):
         temperature=args.temperature
     )
     
-    # Wrap with BT
-    policy = BTWrapper(
+    # Wrap with Adversarial BT
+    policy = AdversarialBTWrapper(
         base_policy=base_policy,
         reward_model=reward_model,
         reward_model_optim=reward_model_optim,
         reward_reg=args.reward_reg,
+        reward_bias=args.reward_bias,
+        adversarial_weight=args.adversarial_weight,
         rm_stop_epoch=args.rm_stop_epoch,
         policy_start_epoch=args.policy_start_epoch
     )
@@ -211,7 +194,7 @@ def train(args=get_args()):
     pref_buffer.load_dataset(rlhf_dataset)
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["adversarial_weight"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -226,15 +209,14 @@ def train(args=get_args()):
         policy=policy,
         eval_env=env,
         buffer=buffer,
+        pref_buffer=pref_buffer,
         logger=logger,
         epoch=args.epoch,
         step_per_epoch=args.step_per_epoch,
         batch_size=args.batch_size,
+        pref_batch_size=args.pref_batch_size,
         eval_episodes=args.eval_episodes,
         lr_scheduler=lr_scheduler,
-        pref_buffer=pref_buffer,
-        pref_batch_size=args.pref_batch_size,
-        pref_batch_num=args.ensemble_num if args.ensemble_num > 1 else None,
         eval_freq=args.eval_freq
     )
 

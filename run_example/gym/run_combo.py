@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 import random
 
 import gym
@@ -7,80 +9,77 @@ import d4rl
 import numpy as np
 import torch
 
-from offlinepbrl.nets import MLP, get_activation
+
+from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian, EnsembleDynamicsModel
-from offlinepbrl.dynamics import EnsemblePreferenceDynamics
+from offlinepbrl.dynamics import EnsembleDynamics
 from offlinepbrl.utils.scaler import StandardScaler
 from offlinepbrl.utils.termination_fns import get_termination_fn
-from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
+from offlinepbrl.utils.load_dataset import qlearning_dataset
 from offlinepbrl.buffer import ReplayBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MBPolicyTrainer
-from offlinepbrl.policy import MOBILEPolicy
+from offlinepbrl.policy import COMBOPolicy
 
 
 """
 suggested hypers
-halfcheetah-random-v2: rollout_length=5, penalty_coef=0.5
-hopper-random-v2: rollout_length=5, penalty_coef=5.0
-walker2d-random-v2: rollout_length=5, penalty_coef=2.0
-halfcheetah-medium-v2: rollout_length=5, penalty_coef=0.5
-hopper-medium-v2: rollout_length=5, penalty_coef=1.5 auto_alpha=False
-walker2d-medium-v2: rollout_length=5, penalty_coef=0.5
-halfcheetah-medium-replay-v2: rollout_length=5, penalty_coef=0.1
-hopper-medium-replay-v2: rollout_length=5, penalty_coef=0.1
-walker2d-medium-replay-v2: rollout_length=1, penalty_coef=0.5
-halfcheetah-medium-expert-v2: rollout_length=5, penalty_coef=2.0
-hopper-medium-expert-v2: rollout_length=5, penalty_coef=1.5
-walker2d-medium-expert-v2: rollout_length=1, penalty_coef=1.5
+
+halfcheetah-medium-v2: rollout_length=5, cql_weight=0.5
+hopper-medium-v2: rollout_length=5, cql_weight=5.0
+walker2d-medium-v2: rollout_length=1, cql_weight=5.0
+halfcheetah-medium-replay-v2: rollout_length=5, cql_weight=0.5
+hopper-medium-replay-v2: rollout_length=5, cql_weight=0.5
+walker2d-medium-replay-v2: rollout_length=1, cql_weight=0.5
+halfcheetah-medium-expert-v2: rollout_length=5, cql_weight=5.0
+hopper-medium-expert-v2: rollout_length=5, cql_weight=5.0
+walker2d-medium-expert-v2: rollout_length=1, cql_weight=5.0
 """
 
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="mobile_p")
-    parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
+    parser.add_argument("--domain", type=str, default="gym")
+    parser.add_argument("--algo_name", type=str, default="combo")
+    parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--actor_lr", type=float, default=1e-4)
     parser.add_argument("--critic_lr", type=float, default=3e-4)
-    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
+    parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
-    parser.add_argument("--auto_alpha", type=bool, default=True)
+    parser.add_argument("--auto_alpha", default=True)
     parser.add_argument("--target_entropy", type=int, default=None)
     parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    parser.add_argument("--num_q_ensemble", type=int, default=2)
-    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--cql_weight", type=float, default=5.0)
+    parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max_q_backup", type=bool, default=False)
-    parser.add_argument("--norm_reward", type=bool, default=False)
+    parser.add_argument("--deterministic_backup", type=bool, default=True)
+    parser.add_argument("--with_lagrange", type=bool, default=False)
+    parser.add_argument("--lagrange_threshold", type=float, default=10.0)
+    parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
+    parser.add_argument("--num_repeat_actions", type=int, default=10)
+    parser.add_argument("--uniform_rollout", type=bool, default=False)
+    parser.add_argument("--rho_s", type=str, default="mix", choices=["model", "mix"])
 
     parser.add_argument("--dynamics_lr", type=float, default=1e-3)
-    parser.add_argument("--max_epochs_since_update", type=int, default=5)
-    parser.add_argument("--dynamics_max_epochs", type=int, default=30)
     parser.add_argument("--dynamics_hidden_dims", type=int, nargs='*', default=[200, 200, 200, 200])
     parser.add_argument("--dynamics_weight_decay", type=float, nargs='*', default=[2.5e-5, 5e-5, 7.5e-5, 7.5e-5, 1e-4])
     parser.add_argument("--n_ensemble", type=int, default=7)
     parser.add_argument("--n_elites", type=int, default=5)
     parser.add_argument("--rollout_freq", type=int, default=1000)
     parser.add_argument("--rollout_batch_size", type=int, default=50000)
-    parser.add_argument("--rollout_length", type=int, default=1)
-    parser.add_argument("--penalty_coef", type=float, default=0.015)
-    parser.add_argument("--num_samples", type=int, default=10)
+    parser.add_argument("--rollout_length", type=int, default=5)
     parser.add_argument("--model_retain_epochs", type=int, default=5)
-    parser.add_argument("--real_ratio", type=float, default=0.05)
+    parser.add_argument("--real_ratio", type=float, default=0.5)
     parser.add_argument("--load_dynamics_path", type=str, default=None)
-    parser.add_argument("--reward_activation", type=str, default="sigmoid")
-    parser.add_argument("--ensemble_reward", type=bool, default=True)
-    parser.add_argument("--uncertainty_mode", type=str, default="aleatoric")
-    parser.add_argument("--reward_uncertainty_mode", type=str, default="ensemble_std_reward")
 
-    parser.add_argument("--epoch", type=int, default=3000)
+    parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--lr_scheduler", type=bool, default=True)
     parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
@@ -91,11 +90,6 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
-    rlhf_dataset = load_rlhf_dataset(env, dataset)
-    if args.norm_reward:
-        r_mean, r_std = dataset["rewards"].mean(), dataset["rewards"].std()
-        dataset["rewards"] = (dataset["rewards"] - r_mean) / (r_std + 1e-3)
-
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
@@ -110,6 +104,8 @@ def train(args=get_args()):
 
     # create policy model
     actor_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
+    critic1_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
+    critic2_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     dist = TanhDiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
         output_dim=args.action_dim,
@@ -118,25 +114,18 @@ def train(args=get_args()):
         max_mu=args.max_action
     )
     actor = ActorProb(actor_backbone, dist, args.device)
+    critic1 = Critic(critic1_backbone, args.device)
+    critic2 = Critic(critic2_backbone, args.device)
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
-    critics = []
-    for i in range(args.num_q_ensemble):
-        critic_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
-        critics.append(Critic(critic_backbone, args.device))
-    critics = torch.nn.ModuleList(critics)
-    critics_optim = torch.optim.Adam(critics.parameters(), lr=args.critic_lr)
+    critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
+    critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
 
-    if args.lr_scheduler:
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
-    else:
-        lr_scheduler = None
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(actor_optim, args.epoch)
 
     if args.auto_alpha:
         target_entropy = args.target_entropy if args.target_entropy \
             else -np.prod(env.action_space.shape)
-
         args.target_entropy = target_entropy
-
         log_alpha = torch.zeros(1, requires_grad=True, device=args.device)
         alpha_optim = torch.optim.Adam([log_alpha], lr=args.alpha_lr)
         alpha = (target_entropy, log_alpha, alpha_optim)
@@ -151,7 +140,6 @@ def train(args=get_args()):
         hidden_dims=args.dynamics_hidden_dims,
         num_ensemble=args.n_ensemble,
         num_elites=args.n_elites,
-        reward_activation=get_activation(args.reward_activation),
         weight_decays=args.dynamics_weight_decay,
         device=args.device
     )
@@ -161,33 +149,39 @@ def train(args=get_args()):
     )
     scaler = StandardScaler()
     termination_fn = get_termination_fn(task=args.task)
-    dynamics = EnsemblePreferenceDynamics(
+    dynamics = EnsembleDynamics(
         dynamics_model,
         dynamics_optim,
         scaler,
-        termination_fn,
-        default_ensemble_reward=args.ensemble_reward,
-        penalty_coef=args.penalty_coef,
-        uncertainty_mode=args.uncertainty_mode,
+        termination_fn
     )
 
     if args.load_dynamics_path:
         dynamics.load(args.load_dynamics_path)
 
     # create policy
-    policy = MOBILEPolicy(
+    policy = COMBOPolicy(
         dynamics,
         actor,
-        critics,
+        critic1,
+        critic2,
         actor_optim,
-        critics_optim,
+        critic1_optim,
+        critic2_optim,
+        action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
         alpha=alpha,
-        penalty_coef=args.penalty_coef,
-        num_samples=args.num_samples,
+        cql_weight=args.cql_weight,
+        temperature=args.temperature,
+        max_q_backup=args.max_q_backup,
         deterministic_backup=args.deterministic_backup,
-        max_q_backup=args.max_q_backup
+        with_lagrange=args.with_lagrange,
+        lagrange_threshold=args.lagrange_threshold,
+        cql_alpha_lr=args.cql_alpha_lr,
+        num_repeart_actions=args.num_repeat_actions,
+        uniform_rollout=args.uniform_rollout,
+        rho_s=args.rho_s
     )
 
     # create buffer
@@ -200,7 +194,6 @@ def train(args=get_args()):
         device=args.device
     )
     real_buffer.load_dataset(dataset)
-
     fake_buffer = ReplayBuffer(
         buffer_size=args.rollout_batch_size*args.rollout_length*args.model_retain_epochs,
         obs_shape=args.obs_shape,
@@ -211,7 +204,7 @@ def train(args=get_args()):
     )
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args), record_params=["penalty_coef", "rollout_length", "real_ratio"])
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
@@ -240,15 +233,8 @@ def train(args=get_args()):
     )
 
     # train
-    offline_data = real_buffer.sample_all()
     if not load_dynamics_model:
-        dynamics.train(offline_data, rlhf_dataset, logger, max_epochs=50, max_epochs_since_update=None)
-    _, pred_rewards, _, pred_info = dynamics.step_batch(offline_data['observations'], offline_data['actions'], uncertainty_mode=args.reward_uncertainty_mode)
-    real_buffer.update_all_rewards(pred_rewards)
-    logger.log("reward: {:.4f}".format(np.mean(pred_rewards)))
-    logger.log("raw_reward: {:.4f}".format(np.mean(pred_info["raw_reward"])))
-    if 'penalty' in pred_info:
-        logger.log("penalty: {:.4f}".format(np.mean(pred_info["penalty"])))
+        dynamics.train(real_buffer.sample_all(), logger, max_epochs_since_update=5)
     
     policy_trainer.train()
 

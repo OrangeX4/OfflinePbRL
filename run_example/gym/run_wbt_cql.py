@@ -28,6 +28,7 @@ cql_weight=5.0, temperature=1.0 for all D4RL-Gym tasks
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--domain", type=str, default="gym")
     parser.add_argument("--algo_name", type=str, default="wbt_cql")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
@@ -102,7 +103,7 @@ def train(args=get_args()):
     env.seed(args.seed)
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",

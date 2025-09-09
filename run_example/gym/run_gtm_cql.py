@@ -9,28 +9,28 @@ import torch
 
 
 from offlinepbrl.nets import MLP
-from offlinepbrl.modules import ActorProb, Critic, RewardModel, TanhDiagGaussian
-from offlinepbrl.utils.load_dataset import load_rlhf_dataset, qlearning_dataset
+from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian
+from offlinepbrl.modules.reward_module import GaussianRewardModel
+from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
-from offlinepbrl.policy import CPRLPolicy
+from offlinepbrl.policy import CQLPolicy
+from offlinepbrl.policy.preference.gtm import GaussianTMWrapper
 
 """
-Conservative Preference Reward Learning (CPRL)
-Combines CQL with preference-based reward learning
+Gaussian Thurstone-Mosteller with CQL
 """
-
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algo_name", type=str, default="cprl_r")
-    parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
+    parser.add_argument("--domain", type=str, default="gym")
+    parser.add_argument("--algo_name", type=str, default="gtm_cql")
+    parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256, 256])
     parser.add_argument("--actor_lr", type=float, default=1e-4)
     parser.add_argument("--critic_lr", type=float, default=3e-4)
-    parser.add_argument("--reward_model_lr", type=float, default=3e-4)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--alpha", type=float, default=0.2)
@@ -38,7 +38,6 @@ def get_args():
     parser.add_argument("--auto_alpha", default=True)
     parser.add_argument("--alpha_lr", type=float, default=1e-4)
 
-    # CQL specific parameters
     parser.add_argument("--cql_weight", type=float, default=5.0)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max_q_backup", type=bool, default=False)
@@ -48,11 +47,17 @@ def get_args():
     parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
     parser.add_argument("--num_repeat_actions", type=int, default=10)
     
-    # Reward model specific parameters
+    # Gaussian TM specific parameters
+    parser.add_argument("--reward_model_lr", type=float, default=3e-4)
     parser.add_argument("--reward_activation", type=str, default="sigmoid", choices=["identity", "sigmoid", "tanh", "relu", "leaky_relu"])
     parser.add_argument("--reward_reg", type=float, default=0.0)
+    parser.add_argument("--reward_ent_reg", type=float, default=0.1)
+    parser.add_argument("--entropy_threshold", type=float, default=0.1)
+    parser.add_argument("--reg_type", type=str, default="transition", choices=["transition", "trajectory"])
+    parser.add_argument("--rm_stop_epoch", type=int, default=200)
+    parser.add_argument("--policy_start_epoch", type=int, default=200)
     
-    parser.add_argument("--epoch", type=int, default=1000)
+    parser.add_argument("--epoch", type=int, default=1200)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=256)
@@ -69,10 +74,9 @@ def train(args=get_args()):
     dataset = qlearning_dataset(env)
     rlhf_dataset = load_rlhf_dataset(env, dataset)
     
-    # Dataset preprocessing similar to CQL
+    # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
     if 'antmaze' in args.task:
         dataset["rewards"] = (dataset["rewards"] - 0.5) * 4.0
-        
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
@@ -85,7 +89,7 @@ def train(args=get_args()):
     torch.backends.cudnn.deterministic = True
     env.seed(args.seed)
 
-    # create policy model - SAC style like CQL
+    # create policy model
     actor_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
     critic1_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
     critic2_backbone = MLP(input_dim=np.prod(args.obs_shape) + args.action_dim, hidden_dims=args.hidden_dims)
@@ -101,7 +105,9 @@ def train(args=get_args()):
     actor = ActorProb(actor_backbone, dist, args.device)
     critic1 = Critic(critic1_backbone, args.device)
     critic2 = Critic(critic2_backbone, args.device)
-    reward_model = RewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
+    
+    # Use Gaussian reward model for Thurstone-Mosteller learning
+    reward_model = GaussianRewardModel(reward_model_backbone, activation=args.reward_activation, device=args.device)
     
     actor_optim = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     critic1_optim = torch.optim.Adam(critic1.parameters(), lr=args.critic_lr)
@@ -120,16 +126,14 @@ def train(args=get_args()):
     else:
         alpha = args.alpha
 
-    # create CPRL policy
-    policy = CPRLPolicy(
+    # create CQL policy
+    base_policy = CQLPolicy(
         actor,
         critic1,
         critic2,
-        reward_model,
         actor_optim,
         critic1_optim,
         critic2_optim,
-        reward_model_optim,
         action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
@@ -141,11 +145,23 @@ def train(args=get_args()):
         with_lagrange=args.with_lagrange,
         lagrange_threshold=args.lagrange_threshold,
         cql_alpha_lr=args.cql_alpha_lr,
-        num_repeart_actions=args.num_repeat_actions,
-        reward_reg=args.reward_reg
+        num_repeart_actions=args.num_repeat_actions
+    )
+    
+    # Wrap with Gaussian TM
+    policy = GaussianTMWrapper(
+        base_policy=base_policy,
+        reward_model=reward_model,
+        reward_model_optim=reward_model_optim,
+        reward_reg=args.reward_reg,
+        reward_ent_reg=args.reward_ent_reg,
+        entropy_threshold=args.entropy_threshold,
+        reg_type=args.reg_type,
+        rm_stop_epoch=args.rm_stop_epoch,
+        policy_start_epoch=args.policy_start_epoch
     )
 
-    # create replay buffer
+    # create buffer
     buffer = ReplayBuffer(
         buffer_size=len(dataset["observations"]),
         obs_shape=args.obs_shape,
@@ -169,7 +185,7 @@ def train(args=get_args()):
     pref_buffer.load_dataset(rlhf_dataset)
 
     # log
-    log_dirs = make_log_dirs(args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
