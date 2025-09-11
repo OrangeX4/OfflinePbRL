@@ -9,7 +9,8 @@ import torch
 
 
 from offlinepbrl.nets import MLP
-from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
+from offlinepbrl.modules import ActorProb, Critic
+from offlinepbrl.modules.dist_module import APPOTanhDiagGaussian
 from offlinepbrl.modules.reward_module import RewardModel, EnsembleRewardModel
 from offlinepbrl.utils.load_metaworld_dataset import load_metaworld_mr_dataset, load_metaworld_rlhf_dataset
 from offlinepbrl.env.util import make_metaworld_env
@@ -97,7 +98,7 @@ def train(args=get_args()):
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
     
-    dist = DiagGaussian(
+    dist = APPOTanhDiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
         output_dim=args.action_dim,
         unbounded=False,

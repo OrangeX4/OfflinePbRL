@@ -112,3 +112,75 @@ class TanhDiagGaussian(DiagGaussian):
             shape[1] = -1
             sigma = (self.sigma_param.view(shape) + torch.zeros_like(mu)).exp()
         return TanhNormalWrapper(mu, sigma, self._max)
+
+
+class APPOTanhNormalWrapper(torch.distributions.Normal):
+    def __init__(self, loc, scale, max_action):
+        super().__init__(loc, scale)
+        self._max_action = max_action
+
+    def log_prob(self, action, raw_action=None):
+        if raw_action is None:
+            # If raw_action is not provided, compute it from the action
+            squashed_action = action/self._max_action
+            raw_action = self.arctanh(squashed_action)
+        
+        log_prob = super().log_prob(raw_action)
+        eps = 1e-6
+        squashed_action = action/self._max_action
+        log_prob = log_prob - torch.log(self._max_action*(1 - squashed_action.pow(2)) + eps)
+        return log_prob
+
+    def mode(self):
+        raw_action = self.mean
+        action = self._max_action * torch.tanh(self.mean)
+        return action, raw_action
+
+    def arctanh(self, x):
+        one_plus_x = (1 + x).clamp(min=1e-6)
+        one_minus_x = (1 - x).clamp(min=1e-6)
+        return 0.5 * torch.log(one_plus_x / one_minus_x)
+
+    def rsample(self):
+        raw_action = super().rsample()
+        action = self._max_action * torch.tanh(raw_action)
+        return action, raw_action
+
+    def sample(self):
+        raw_action = super().sample()
+        action = self._max_action * torch.tanh(raw_action)
+        return action
+
+
+class APPOTanhDiagGaussian(DiagGaussian):
+    def __init__(
+        self,
+        latent_dim,
+        output_dim,
+        unbounded=False,
+        conditioned_sigma=False,
+        max_mu=1.0,
+        sigma_min=-5.0,
+        sigma_max=2.0
+    ):
+        super().__init__(
+            latent_dim=latent_dim,
+            output_dim=output_dim,
+            unbounded=unbounded,
+            conditioned_sigma=conditioned_sigma,
+            max_mu=max_mu,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max
+        )
+
+    def forward(self, logits):
+        mu = self.mu(logits)
+        if not self._unbounded:
+            mu = self._max * torch.tanh(mu)
+        if self._c_sigma:
+            sigma = torch.clamp(self.sigma(logits), min=self._sigma_min, max=self._sigma_max).exp()
+        else:
+            shape = [1] * len(mu.shape)
+            shape[1] = -1
+            sigma = (self.sigma_param.view(shape) + torch.zeros_like(mu)).exp()
+        return APPOTanhNormalWrapper(mu, sigma, self._max)

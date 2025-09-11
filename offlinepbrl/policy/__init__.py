@@ -52,6 +52,7 @@ __all__ = [
     "BCLPolicy",
     "BTWrapper",
     "AdversarialBTWrapper",
+    "WeightedBTWrapper",
     "GaussianTMWrapper",
     "APPOPolicy",
 ]
