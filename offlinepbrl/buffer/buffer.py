@@ -105,6 +105,47 @@ class ReplayBuffer:
             "rewards": torch.tensor(self.rewards[batch_indexes]).to(self.device)
         }
     
+    def sample_trajectory(self, batch_size: int, segment_size: int) -> Dict[str, torch.Tensor]:
+        """Sample trajectory segments for APPO algorithm.
+        
+        Args:
+            batch_size: Number of trajectory pairs to sample (each pair will have 2*batch_size segments)
+            segment_size: Length of each trajectory segment
+            
+        Returns:
+            Dictionary containing sampled trajectory data
+        """
+        # Assume each trajectory has 500 steps (following local/APPO implementation)
+        traj_length = 500
+        num_traj = self._size // traj_length
+        
+        if num_traj < 1:
+            raise ValueError(f"Not enough data for trajectory sampling. Need at least {traj_length} samples, got {self._size}")
+        
+        # Sample trajectory pairs (2 * batch_size segments total)
+        traj_indices = np.random.choice(num_traj, 2 * batch_size, replace=True)
+        
+        # For each trajectory, sample a random starting point for the segment
+        start_indices = []
+        for traj_idx in traj_indices:
+            traj_start = traj_idx * traj_length
+            # Make sure we don't go beyond trajectory boundaries
+            max_start = traj_start + traj_length - segment_size
+            start_pos = np.random.randint(traj_start, max_start)
+            segment_indices = list(range(start_pos, start_pos + segment_size))
+            start_indices.extend(segment_indices)
+        
+        return {
+            "observations": torch.tensor(self.observations[start_indices]).to(self.device),
+            "actions": torch.tensor(self.actions[start_indices]).to(self.device),
+            "next_observations": torch.tensor(self.next_observations[start_indices]).to(self.device),
+            "terminals": torch.tensor(self.terminals[start_indices]).to(self.device),
+            "rewards": torch.tensor(self.rewards[start_indices]).to(self.device),
+            # Metadata to reconstruct segment grouping
+            "segment_size": torch.tensor(segment_size, device=self.device),
+            "pair_batch_size": torch.tensor(batch_size, device=self.device)
+        }
+
     def sample_all(self) -> Dict[str, np.ndarray]:
         return {
             "observations": self.observations[:self._size].copy(),

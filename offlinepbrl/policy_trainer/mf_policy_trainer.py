@@ -30,6 +30,8 @@ class MFPolicyTrainer:
         pref_batch_size: Optional[int] = None,
         pref_batch_num: Optional[int] = None,
         eval_freq: int = 1,
+        traj_batch_size: Optional[int] = None,
+        segment_size: Optional[int] = None,
     ) -> None:
         self.policy = policy
         self.eval_env = eval_env
@@ -45,6 +47,8 @@ class MFPolicyTrainer:
         self._eval_episodes = eval_episodes
         self.lr_scheduler = lr_scheduler
         self._eval_freq = eval_freq
+        self._traj_batch_size = traj_batch_size
+        self._segment_size = segment_size
 
     def train(self) -> Dict[str, float]:
         start_time = time.time()
@@ -73,8 +77,21 @@ class MFPolicyTrainer:
                             "replay": replay_batch,
                             "pref": preference_batch,
                         }
+                    
+                    # Add trajectory batch if needed (for APPO)
+                    if self._traj_batch_size is not None and self._segment_size is not None:
+                        traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
+                        batch["traj"] = traj_batch
                 else:
                     batch = self.buffer.sample(self._batch_size)
+                    
+                    # Add trajectory batch if needed (for APPO without preference buffer)
+                    if self._traj_batch_size is not None and self._segment_size is not None:
+                        traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
+                        batch = {
+                            "replay": batch,
+                            "traj": traj_batch,
+                        }
                 
                 loss = self.policy.learn(batch, epoch=e, step=it)
                 pbar.set_postfix(**loss)

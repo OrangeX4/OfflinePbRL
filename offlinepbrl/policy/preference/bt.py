@@ -104,8 +104,18 @@ class BTWrapper:
 
         return metrics
 
-    def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
-        replay_batch, pref_batch = batch["replay"], batch["pref"]
+    def learn(self, batch, epoch=None, step=None) -> Dict[str, float]:
+        # Handle different input formats
+        if isinstance(batch, dict) and "replay" in batch:
+            # Called with combined batch from trainer
+            replay_batch = batch["replay"]
+            pref_batch = batch.get("pref", None)
+            traj_batch = batch.get("traj", None)
+        else:
+            # Called directly with replay batch only
+            replay_batch = batch
+            pref_batch = None
+            traj_batch = None
         
         # Determine if BT learning should happen
         should_train_rm = True
@@ -119,8 +129,8 @@ class BTWrapper:
         
         result = {}
         
-        # BT preference learning
-        if should_train_rm:
+        # BT preference learning - only if pref_batch is provided
+        if should_train_rm and pref_batch is not None:
             if isinstance(pref_batch, (list, tuple)):
                 # Handle ensemble case with list of pref_batches
                 assert isinstance(self.reward_model_optim, Iterable)
@@ -147,7 +157,19 @@ class BTWrapper:
             with torch.no_grad():
                 replay_rewards = self.reward_model.select_reward(replay_batch["observations"], replay_batch["actions"])
                 replay_batch["rewards"] = replay_rewards
-            base_result = self._base_learn(replay_batch)
+            
+            # Prepare batch for base policy
+            if traj_batch is not None:
+                # Update trajectory batch rewards too
+                with torch.no_grad():
+                    traj_rewards = self.reward_model.select_reward(traj_batch["observations"], traj_batch["actions"])
+                    traj_batch["rewards"] = traj_rewards
+                # Pass combined batch to base policy
+                base_batch = {"replay": replay_batch, "traj": traj_batch}
+                base_result = self._base_learn(base_batch, epoch=epoch, step=step)
+            else:
+                # Pass replay batch directly
+                base_result = self._base_learn(replay_batch, epoch=epoch, step=step)
             result.update(base_result)
 
         return result

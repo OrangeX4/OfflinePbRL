@@ -9,8 +9,7 @@ import torch
 
 
 from offlinepbrl.nets import MLP
-from offlinepbrl.modules import ActorProb, Critic
-from offlinepbrl.modules.dist_module import APPOTanhDiagGaussian
+from offlinepbrl.modules import ActorProb, Critic, TanhDiagGaussian
 from offlinepbrl.modules.reward_module import RewardModel, EnsembleRewardModel
 from offlinepbrl.utils.load_metaworld_dataset import load_metaworld_mr_dataset, load_metaworld_rlhf_dataset
 from offlinepbrl.env.util import make_metaworld_env
@@ -19,6 +18,16 @@ from offlinepbrl.utils.logger import Logger, make_log_dirs
 from offlinepbrl.policy_trainer import MFPolicyTrainer
 from offlinepbrl.policy import BTWrapper, APPOPolicy
 
+"""
+APPO (Adversarial Preference-based Policy Optimization) for MetaWorld
+Suggested hypers based on paper:
+- lam: 0.03 (adversarial loss coefficient) 
+- alpha: 0.2 (entropy regularization)
+- traj_batch_size: 16 (trajectory pairs)
+- segment_size: 25 (trajectory segment length)
+"""
+
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", type=str, default="metaworld")
@@ -26,15 +35,20 @@ def get_args():
     parser.add_argument("--task", type=str, default="box-close-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
-    parser.add_argument("--actor_lr", type=float, default=3e-4)
+    parser.add_argument("--actor_lr", type=float, default=3e-5)  # Lower lr for actor in APPO
     parser.add_argument("--critic_q_lr", type=float, default=3e-4)
     parser.add_argument("--critic_v_lr", type=float, default=3e-4)
     parser.add_argument("--dropout_rate", type=float, default=None)
     parser.add_argument("--lr_decay", type=bool, default=True)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--lam", type=float, default=1e-3)
-    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--tau", type=float, default=0.001)  # Smaller tau for APPO
+    
+    # APPO specific parameters
+    parser.add_argument("--lam", type=float, default=3e-2)  # Adversarial loss coefficient
+    parser.add_argument("--alpha", type=float, default=0.2)  # Entropy regularization
+    parser.add_argument("--auto_alpha", type=bool, default=True)
+    parser.add_argument("--alpha_lr", type=float, default=3e-4)
+    parser.add_argument("--traj_batch_size", type=int, default=16)  # Trajectory batch size
     
     # BT specific parameters
     parser.add_argument("--reward_model_lr", type=float, default=3e-4)
@@ -98,7 +112,7 @@ def train(args=get_args()):
     critic_q2_backbone = MLP(input_dim=np.prod(args.obs_shape)+args.action_dim, hidden_dims=args.hidden_dims)
     critic_v_backbone = MLP(input_dim=np.prod(args.obs_shape), hidden_dims=args.hidden_dims)
     
-    dist = APPOTanhDiagGaussian(
+    dist = TanhDiagGaussian(
         latent_dim=getattr(actor_backbone, "output_dim"),
         output_dim=args.action_dim,
         unbounded=False,
@@ -149,8 +163,11 @@ def train(args=get_args()):
         action_space=env.action_space,
         tau=args.tau,
         gamma=args.gamma,
+        lam=args.lam,  # adversarial loss coefficient
         alpha=args.alpha,
-        lam=args.lam,
+        auto_alpha=args.auto_alpha,
+        alpha_lr=args.alpha_lr,
+        device=args.device
     )
     
     # Wrap with BT
@@ -212,6 +229,8 @@ def train(args=get_args()):
         pref_batch_size=args.pref_batch_size,
         pref_batch_num=args.ensemble_num if args.ensemble_num > 1 else None,
         eval_freq=args.eval_freq,
+        traj_batch_size=args.traj_batch_size,  # For APPO trajectory sampling
+        segment_size=args.segment_size  # Trajectory segment length
     )
 
     # train
