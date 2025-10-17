@@ -21,6 +21,7 @@ from offlinepbrl.policy.model_based.combo import COMBOPolicy
 from offlinepbrl.policy.preference.ipl_iql import IPLIQLPolicy
 from offlinepbrl.policy.preference.ipl_awac import IPLAWACPolicy
 from offlinepbrl.policy.preference.ipl_cql import IPLCQLPolicy
+from offlinepbrl.policy.preference.cipl_iql import CIPLIQLPolicy
 from offlinepbrl.policy.preference.aipl_iql import AdversarialIPLIQLPolicy
 from offlinepbrl.policy.preference.cprl import CPRLPolicy
 from offlinepbrl.policy.preference.bcl import BCLPolicy
@@ -48,6 +49,8 @@ __all__ = [
     "IPLIQLPolicy",
     "IPLAWACPolicy",
     "IPLCQLPolicy",
+    "AdversarialIPLIQLPolicy",
+    "CIPLIQLPolicy",
     "CPRLPolicy",
     "BCLPolicy",
     "BTWrapper",
