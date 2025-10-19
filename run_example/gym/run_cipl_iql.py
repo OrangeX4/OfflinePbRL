@@ -10,6 +10,7 @@ import torch
 
 from offlinepbrl.nets import MLP
 from offlinepbrl.modules import ActorProb, Critic, DiagGaussian
+from offlinepbrl.utils.argument import str2bool
 from offlinepbrl.utils.load_dataset import load_rlhf_dataset, qlearning_dataset
 from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
 from offlinepbrl.utils.logger import Logger, make_log_dirs
@@ -49,7 +50,7 @@ def get_args():
     # CQL/Conservative specific parameters
     parser.add_argument("--cql_weight", type=float, default=1.0)
     parser.add_argument("--cql_temperature", type=float, default=1.0)
-    parser.add_argument("--use_logsumexp", type=bool, default=True)
+    parser.add_argument("--use_logsumexp", type=str2bool, default=True)
     parser.add_argument("--num_repeat_actions", type=int, default=10)
     
     parser.add_argument("--epoch", type=int, default=1000)
