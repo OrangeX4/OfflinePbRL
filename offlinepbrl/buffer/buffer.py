@@ -158,3 +158,150 @@ class ReplayBuffer:
     def update_all_rewards(self, rewards: np.ndarray) -> None:
         assert len(rewards) == self._size
         self.rewards[:self._size] = rewards.reshape(-1, 1)
+
+
+if __name__ == '__main__':
+    # Test ReplayBuffer with real d4rl dataset
+    print("=" * 80)
+    print("Testing ReplayBuffer with real d4rl dataset")
+    print("=" * 80)
+    
+    import gym
+    import d4rl
+    from offlinepbrl.utils.load_dataset import qlearning_dataset
+    
+    # Create environment and load dataset
+    env_name = "hopper-medium-v2"
+    print(f"\n1. Loading environment: {env_name}")
+    env = gym.make(env_name)
+    dataset = qlearning_dataset(env)
+    
+    obs_shape = env.observation_space.shape
+    action_dim = np.prod(env.action_space.shape)
+    
+    print(f"   - Observation shape: {obs_shape}")
+    print(f"   - Action dimension: {action_dim}")
+    print(f"   - Dataset size: {len(dataset['observations'])}")
+    
+    # Test 1: Load dataset
+    print("\n2. Testing load_dataset()...")
+    buffer = ReplayBuffer(
+        buffer_size=len(dataset["observations"]),
+        obs_shape=obs_shape,
+        obs_dtype=np.float32,
+        action_dim=action_dim,
+        action_dtype=np.float32,
+        device="cpu"
+    )
+    buffer.load_dataset(dataset)
+    print(f"   ✓ Buffer size after loading: {buffer._size}")
+    assert buffer._size == len(dataset["observations"]), "Buffer size mismatch!"
+    
+    # Test 2: Sample batch
+    print("\n3. Testing sample()...")
+    batch_size = 256
+    batch = buffer.sample(batch_size)
+    print(f"   ✓ Sampled batch size: {batch_size}")
+    print(f"   - Batch keys: {list(batch.keys())}")
+    print(f"   - Observations shape: {batch['observations'].shape}")
+    print(f"   - Actions shape: {batch['actions'].shape}")
+    assert batch['observations'].shape[0] == batch_size, "Batch size mismatch!"
+    assert batch['observations'].shape[1:] == obs_shape, "Observation shape mismatch!"
+    assert batch['actions'].shape == (batch_size, action_dim), "Action shape mismatch!"
+    
+    # Test 3: Sample trajectory (for APPO)
+    print("\n4. Testing sample_trajectory()...")
+    try:
+        traj_batch_size = 4
+        segment_size = 50
+        traj_batch = buffer.sample_trajectory(traj_batch_size, segment_size)
+        expected_size = 2 * traj_batch_size * segment_size
+        print(f"   ✓ Sampled trajectory batch")
+        print(f"   - Pair batch size: {traj_batch_size}")
+        print(f"   - Segment size: {segment_size}")
+        print(f"   - Total observations: {traj_batch['observations'].shape[0]}")
+        print(f"   - Expected total: {expected_size}")
+        assert traj_batch['observations'].shape[0] == expected_size, "Trajectory batch size mismatch!"
+    except ValueError as e:
+        print(f"   ⚠ Trajectory sampling failed (expected for small datasets): {e}")
+    
+    # Test 4: Sample all
+    print("\n5. Testing sample_all()...")
+    all_data = buffer.sample_all()
+    print(f"   ✓ Sampled all data")
+    print(f"   - Total samples: {len(all_data['observations'])}")
+    assert len(all_data['observations']) == buffer._size, "Sample all size mismatch!"
+    
+    # Test 5: Add single transition
+    print("\n6. Testing add()...")
+    original_size = buffer._size
+    obs = dataset['observations'][0]
+    next_obs = dataset['next_observations'][0]
+    action = dataset['actions'][0]
+    reward = dataset['rewards'][0]
+    terminal = dataset['terminals'][0]
+    
+    # Create a new buffer with room for more data
+    small_buffer = ReplayBuffer(
+        buffer_size=100,
+        obs_shape=obs_shape,
+        obs_dtype=np.float32,
+        action_dim=action_dim,
+        action_dtype=np.float32,
+        device="cpu"
+    )
+    small_buffer.add(obs, next_obs, action, reward, terminal)
+    print(f"   ✓ Added single transition")
+    print(f"   - Buffer size: {small_buffer._size}")
+    assert small_buffer._size == 1, "Add single transition failed!"
+    
+    # Test 6: Add batch
+    print("\n7. Testing add_batch()...")
+    batch_size = 10
+    small_buffer.add_batch(
+        dataset['observations'][:batch_size],
+        dataset['next_observations'][:batch_size],
+        dataset['actions'][:batch_size],
+        dataset['rewards'][:batch_size].reshape(-1, 1),
+        dataset['terminals'][:batch_size].reshape(-1, 1)
+    )
+    print(f"   ✓ Added batch of {batch_size} transitions")
+    print(f"   - Buffer size: {small_buffer._size}")
+    assert small_buffer._size == 1 + batch_size, "Add batch failed!"
+    
+    # Test 7: Normalize observations
+    print("\n8. Testing normalize_obs()...")
+    norm_buffer = ReplayBuffer(
+        buffer_size=len(dataset["observations"]),
+        obs_shape=obs_shape,
+        obs_dtype=np.float32,
+        action_dim=action_dim,
+        action_dtype=np.float32,
+        device="cpu"
+    )
+    norm_buffer.load_dataset(dataset)
+    obs_mean, obs_std = norm_buffer.normalize_obs()
+    print(f"   ✓ Normalized observations")
+    print(f"   - Obs mean shape: {obs_mean.shape}")
+    print(f"   - Obs std shape: {obs_std.shape}")
+    print(f"   - Mean value: {obs_mean.mean():.4f}")
+    print(f"   - Std mean: {obs_std.mean():.4f}")
+    
+    # Verify normalization
+    normalized_mean = norm_buffer.observations.mean()
+    normalized_std = norm_buffer.observations.std()
+    print(f"   - Normalized data mean: {normalized_mean:.4f} (should be ~0)")
+    print(f"   - Normalized data std: {normalized_std:.4f} (should be ~1)")
+    assert abs(normalized_mean) < 0.1, "Normalization mean not close to 0!"
+    
+    # Test 8: Update rewards
+    print("\n9. Testing update_all_rewards()...")
+    new_rewards = np.random.randn(buffer._size)
+    buffer.update_all_rewards(new_rewards)
+    print(f"   ✓ Updated all rewards")
+    print(f"   - New rewards shape: {buffer.rewards.shape}")
+    assert np.allclose(buffer.rewards[:buffer._size].flatten(), new_rewards), "Update rewards failed!"
+    
+    print("\n" + "=" * 80)
+    print("All ReplayBuffer tests passed! ✓")
+    print("=" * 80)

@@ -8,7 +8,7 @@ import gym
 from typing import Optional, Dict, List
 from tqdm import tqdm
 from collections import deque
-from offlinepbrl.buffer import ReplayBuffer, PrefBuffer
+from offlinepbrl.buffer import ReplayBuffer, PrefBuffer, TrajectoryBuffer
 from offlinepbrl.utils.logger import Logger
 from offlinepbrl.policy import BasePolicy
 
@@ -49,6 +49,7 @@ class MFPolicyTrainer:
         self._eval_freq = eval_freq
         self._traj_batch_size = traj_batch_size
         self._segment_size = segment_size
+        self._supports_traj_sampling = isinstance(buffer, TrajectoryBuffer)
 
     def train(self) -> Dict[str, float]:
         start_time = time.time()
@@ -78,20 +79,35 @@ class MFPolicyTrainer:
                             "pref": preference_batch,
                         }
                     
-                    # Add trajectory batch if needed (for APPO)
-                    if self._traj_batch_size is not None and self._segment_size is not None:
-                        traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
-                        batch["traj"] = traj_batch
+                    # Add trajectory batch if buffer supports it and traj_batch_size is set
+                    if self._traj_batch_size is not None:
+                        if self._supports_traj_sampling:
+                            # TrajectoryBuffer: sample complete trajectories
+                            traj_batch = self.buffer.sample_trajectories(self._traj_batch_size)
+                            batch["trajectory"] = traj_batch
+                        elif self._segment_size is not None:
+                            # ReplayBuffer with segment sampling (for APPO)
+                            traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
+                            batch["traj"] = traj_batch
                 else:
                     batch = self.buffer.sample(self._batch_size)
                     
-                    # Add trajectory batch if needed (for APPO without preference buffer)
-                    if self._traj_batch_size is not None and self._segment_size is not None:
-                        traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
-                        batch = {
-                            "replay": batch,
-                            "traj": traj_batch,
-                        }
+                    # Add trajectory batch if buffer supports it and traj_batch_size is set
+                    if self._traj_batch_size is not None:
+                        if self._supports_traj_sampling:
+                            # TrajectoryBuffer: sample complete trajectories
+                            traj_batch = self.buffer.sample_trajectories(self._traj_batch_size)
+                            batch = {
+                                "replay": batch,
+                                "trajectory": traj_batch,
+                            }
+                        elif self._segment_size is not None:
+                            # ReplayBuffer with segment sampling (for APPO)
+                            traj_batch = self.buffer.sample_trajectory(self._traj_batch_size, self._segment_size)
+                            batch = {
+                                "replay": batch,
+                                "traj": traj_batch,
+                            }
                 
                 loss = self.policy.learn(batch, epoch=e, step=it)
                 pbar.set_postfix(**loss)

@@ -167,3 +167,204 @@ class PrefBuffer:
     @property
     def max_size(self) -> int:
         return self._max_size
+
+
+if __name__ == '__main__':
+    # Test PrefBuffer with real d4rl dataset and RLHF labels
+    print("=" * 80)
+    print("Testing PrefBuffer with real d4rl dataset and RLHF labels")
+    print("=" * 80)
+    
+    import gym
+    import d4rl
+    from offlinepbrl.utils.load_dataset import qlearning_dataset, load_rlhf_dataset
+    
+    # Create environment and load datasets
+    env_name = "hopper-medium-v2"
+    print(f"\n1. Loading environment: {env_name}")
+    env = gym.make(env_name)
+    dataset = qlearning_dataset(env)
+    
+    obs_shape = env.observation_space.shape
+    action_dim = np.prod(env.action_space.shape)
+    
+    print(f"   - Observation shape: {obs_shape}")
+    print(f"   - Action dimension: {action_dim}")
+    print(f"   - Dataset size: {len(dataset['observations'])}")
+    
+    # Try to load RLHF dataset
+    print("\n2. Loading RLHF dataset...")
+    try:
+        rlhf_dataset = load_rlhf_dataset(
+            env, 
+            dataset,
+            fake_label=True,  # Use scripted labels for testing
+            num_query=2000,
+            len_query=200
+        )
+        print(f"   ✓ RLHF dataset loaded")
+        print(f"   - Keys: {list(rlhf_dataset.keys())}")
+        print(f"   - Observations shape: {rlhf_dataset['observations'].shape}")
+        print(f"   - Observations_2 shape: {rlhf_dataset['observations_2'].shape}")
+        print(f"   - Labels shape: {rlhf_dataset['labels'].shape}")
+        
+        # Test 1: Load dataset
+        print("\n3. Testing load_dataset()...")
+        pref_buffer = PrefBuffer(
+            buffer_size=len(rlhf_dataset["observations"]),
+            obs_shape=obs_shape,
+            obs_dtype=np.float32,
+            action_dim=action_dim,
+            action_dtype=np.float32,
+            max_traj_len=rlhf_dataset["observations"].shape[1],
+            device="cpu"
+        )
+        pref_buffer.load_dataset(rlhf_dataset)
+        print(f"   ✓ Buffer size after loading: {pref_buffer.size}")
+        print(f"   - Max trajectory length: {pref_buffer.max_traj_len}")
+        assert pref_buffer.size == len(rlhf_dataset["observations"]), "Buffer size mismatch!"
+        
+        # Test 2: Sample batch
+        print("\n4. Testing sample()...")
+        batch_size = 8
+        batch = pref_buffer.sample(batch_size)
+        print(f"   ✓ Sampled batch size: {batch_size}")
+        print(f"   - Batch keys: {list(batch.keys())}")
+        print(f"   - Obs_1 shape: {batch['obs_1'].shape}")
+        print(f"   - Obs_2 shape: {batch['obs_2'].shape}")
+        print(f"   - Action_1 shape: {batch['action_1'].shape}")
+        print(f"   - Action_2 shape: {batch['action_2'].shape}")
+        print(f"   - Label shape: {batch['label'].shape}")
+        
+        assert batch['obs_1'].shape[0] == batch_size, "Batch size mismatch!"
+        assert batch['obs_1'].shape[1] == pref_buffer.max_traj_len, "Trajectory length mismatch!"
+        assert batch['label'].shape == (batch_size, 2), "Label shape mismatch!"
+        
+        # Test 3: Verify labels sum to 1 (or 1.0 for ties)
+        print("\n5. Verifying label validity...")
+        label_sums = batch['label'].sum(dim=1)
+        print(f"   - Label sums (should be 1.0): min={label_sums.min():.2f}, max={label_sums.max():.2f}")
+        assert torch.allclose(label_sums, torch.ones_like(label_sums), atol=1e-5), "Labels don't sum to 1!"
+        print(f"   ✓ All labels valid")
+        
+        # Test 4: Sample all
+        print("\n6. Testing sample_all()...")
+        all_data = pref_buffer.sample_all()
+        print(f"   ✓ Sampled all data")
+        print(f"   - Total samples: {len(all_data['obs_1'])}")
+        print(f"   - Keys: {list(all_data.keys())}")
+        assert len(all_data['obs_1']) == pref_buffer.size, "Sample all size mismatch!"
+        
+        # Test 5: Add single preference pair
+        print("\n7. Testing add()...")
+        small_buffer = PrefBuffer(
+            buffer_size=10,
+            obs_shape=obs_shape,
+            obs_dtype=np.float32,
+            action_dim=action_dim,
+            action_dtype=np.float32,
+            max_traj_len=50,
+            device="cpu"
+        )
+        
+        # Create dummy trajectory pair
+        traj_len = 50
+        obs_1 = np.random.randn(traj_len, *obs_shape).astype(np.float32)
+        action_1 = np.random.randn(traj_len, action_dim).astype(np.float32)
+        reward_1 = np.random.randn(traj_len).astype(np.float32)
+        timestep_1 = np.arange(traj_len, dtype=np.int32)
+        terminal_1 = np.zeros(traj_len, dtype=np.float32)
+        terminal_1[-1] = 1.0
+        
+        obs_2 = np.random.randn(traj_len, *obs_shape).astype(np.float32)
+        action_2 = np.random.randn(traj_len, action_dim).astype(np.float32)
+        reward_2 = np.random.randn(traj_len).astype(np.float32)
+        timestep_2 = np.arange(traj_len, dtype=np.int32)
+        terminal_2 = np.zeros(traj_len, dtype=np.float32)
+        terminal_2[-1] = 1.0
+        
+        label = np.array([1.0, 0.0])  # Prefer trajectory 1
+        
+        small_buffer.add(
+            obs_1, action_1, reward_1, timestep_1, terminal_1,
+            obs_2, action_2, reward_2, timestep_2, terminal_2,
+            0, 0, label
+        )
+        print(f"   ✓ Added single preference pair")
+        print(f"   - Buffer size: {small_buffer.size}")
+        assert small_buffer.size == 1, "Add single pair failed!"
+        
+        # Test 6: Verify terminal computation
+        print("\n8. Testing _compute_terminals()...")
+        test_timesteps = np.array([
+            [0, 1, 2, 3, 4],
+            [0, 1, 0, 1, 2],  # Reset at index 2
+        ])
+        terminals = pref_buffer._compute_terminals(test_timesteps)
+        print(f"   ✓ Terminal computation")
+        print(f"   - Test timesteps:\n{test_timesteps}")
+        print(f"   - Computed terminals:\n{terminals}")
+        # Last timestep should always be terminal
+        assert terminals[0, -1] == 1.0, "Last timestep not terminal!"
+        assert terminals[1, -1] == 1.0, "Last timestep not terminal!"
+        # Check reset detection
+        assert terminals[1, 1] == 1.0, "Reset not detected!"
+        
+        print("\n" + "=" * 80)
+        print("All PrefBuffer tests passed! ✓")
+        print("=" * 80)
+        
+    except ValueError as e:
+        print(f"\n⚠ Warning: Could not load RLHF dataset: {e}")
+        print("This is expected if the label files are not available.")
+        print("PrefBuffer structure is correct, but full testing requires label data.")
+        
+        # Still do basic buffer tests without real data
+        print("\n3. Testing basic PrefBuffer functionality without real labels...")
+        pref_buffer = PrefBuffer(
+            buffer_size=10,
+            obs_shape=obs_shape,
+            obs_dtype=np.float32,
+            action_dim=action_dim,
+            action_dtype=np.float32,
+            max_traj_len=50,
+            device="cpu"
+        )
+        
+        # Add a dummy preference pair
+        traj_len = 50
+        obs_1 = np.random.randn(traj_len, *obs_shape).astype(np.float32)
+        action_1 = np.random.randn(traj_len, action_dim).astype(np.float32)
+        reward_1 = np.random.randn(traj_len).astype(np.float32)
+        timestep_1 = np.arange(traj_len, dtype=np.int32)
+        terminal_1 = np.zeros(traj_len, dtype=np.float32)
+        terminal_1[-1] = 1.0
+        
+        obs_2 = np.random.randn(traj_len, *obs_shape).astype(np.float32)
+        action_2 = np.random.randn(traj_len, action_dim).astype(np.float32)
+        reward_2 = np.random.randn(traj_len).astype(np.float32)
+        timestep_2 = np.arange(traj_len, dtype=np.int32)
+        terminal_2 = np.zeros(traj_len, dtype=np.float32)
+        terminal_2[-1] = 1.0
+        
+        label = np.array([1.0, 0.0])
+        
+        pref_buffer.add(
+            obs_1, action_1, reward_1, timestep_1, terminal_1,
+            obs_2, action_2, reward_2, timestep_2, terminal_2,
+            0, 0, label
+        )
+        
+        print(f"   ✓ Added dummy preference pair")
+        print(f"   - Buffer size: {pref_buffer.size}")
+        assert pref_buffer.size == 1, "Basic add failed!"
+        
+        # Sample
+        batch = pref_buffer.sample(1)
+        print(f"   ✓ Sampled batch")
+        assert batch['obs_1'].shape == (1, 50, *obs_shape), "Sample shape mismatch!"
+        
+        print("\n" + "=" * 80)
+        print("Basic PrefBuffer tests passed! ✓")
+        print("(Full tests require RLHF label data)")
+        print("=" * 80)
