@@ -199,7 +199,7 @@ def train(args=get_args()):
     pref_buffer.load_dataset(rlhf_dataset)
 
     # log
-    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["tar_coef", "tar_clip_max"])
     output_config = {
         "consoleout_backup": "stdout",
         "policy_training_progress": "csv",
