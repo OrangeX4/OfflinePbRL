@@ -38,6 +38,7 @@ def get_args():
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--expectile", type=float, default=0.7)
     parser.add_argument("--temperature", type=float, default=3.0)
+    parser.add_argument("--const_reward", type=float, default=None, help="Set all rewards to this constant value.")
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
@@ -88,6 +89,8 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
+    if args.const_reward is not None:
+        dataset["rewards"] = np.full_like(dataset["rewards"], args.const_reward)
     if 'antmaze' in args.task:
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
@@ -166,7 +169,7 @@ def train(args=get_args()):
     buffer.load_dataset(dataset)
 
     # log
-    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["const_reward"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",

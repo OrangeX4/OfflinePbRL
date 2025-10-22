@@ -48,6 +48,7 @@ def get_args():
     parser.add_argument("--cql_alpha_lr", type=float, default=3e-4)
     parser.add_argument("--num_repeat_actions", type=int, default=10)
     
+    parser.add_argument("--const_reward", type=float, default=None, help="Set all rewards to this constant value.")
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
     parser.add_argument("--eval_episodes", type=int, default=10)
@@ -62,6 +63,8 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
+    if args.const_reward is not None:
+        dataset["rewards"] = np.full_like(dataset["rewards"], args.const_reward)
     # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
     if 'antmaze' in args.task:
         dataset["rewards"] = (dataset["rewards"] - 0.5) * 4.0
@@ -141,7 +144,7 @@ def train(args=get_args()):
     buffer.load_dataset(dataset)
 
     # log
-    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args))
+    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["const_reward"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
