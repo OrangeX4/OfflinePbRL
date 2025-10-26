@@ -92,44 +92,46 @@ class IQLPolicy(BasePolicy):
             q1, q2 = self.critic_q1_old(obss, actions), self.critic_q2_old(obss, actions)
             q = torch.min(q1, q2)
         v = self.critic_v(obss)
-        critic_v_loss = self._expectile_regression(q-v).mean()
+        adv = q - v
+        critic_v_loss = self._expectile_regression(adv).mean()
         self.critic_v_optim.zero_grad()
         critic_v_loss.backward()
         self.critic_v_optim.step()
 
         # update critic
-        q1, q2 = self.critic_q1(obss, actions), self.critic_q2(obss, actions)
         with torch.no_grad():
             next_v = self.critic_v(next_obss)
             target_q = rewards + self._gamma * (1 - terminals) * next_v
         
+        q1, q2 = self.critic_q1(obss, actions), self.critic_q2(obss, actions)
         critic_q1_loss = ((q1 - target_q).pow(2)).mean()
         critic_q2_loss = ((q2 - target_q).pow(2)).mean()
+        critic_q_loss = critic_q1_loss + critic_q2_loss
 
         self.critic_q1_optim.zero_grad()
-        critic_q1_loss.backward()
-        self.critic_q1_optim.step()
-
         self.critic_q2_optim.zero_grad()
-        critic_q2_loss.backward()
+        critic_q_loss.backward()
+        self.critic_q1_optim.step()
         self.critic_q2_optim.step()
+
+        # Sync target network AFTER Q update but BEFORE actor update
+        self._sync_weight()
 
         # update actor
         with torch.no_grad():
+            v = self.critic_v(obss)
             q1, q2 = self.critic_q1_old(obss, actions), self.critic_q2_old(obss, actions)
             q = torch.min(q1, q2)
-            v = self.critic_v(obss)
             exp_a = torch.exp((q - v) * self._temperature)
             exp_a = torch.clip(exp_a, None, 100.0)
+        
         dist = self.actor(obss)
-        log_probs = dist.log_prob(actions)
-        actor_loss = -(exp_a * log_probs).mean()
+        log_probs = dist.log_prob(actions).sum(dim=-1, keepdim=False)
+        actor_loss = -(exp_a.squeeze(-1) * log_probs).mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
         self.actor_optim.step()
-
-        self._sync_weight()
 
         return {
             "loss/actor": actor_loss.item(),
@@ -138,5 +140,8 @@ class IQLPolicy(BasePolicy):
             "loss/v": critic_v_loss.item(),
             "misc/q1": q1.mean().item(),
             "misc/q2": q2.mean().item(),
+            "misc/v": v.mean().item(),
             "misc/next_v": next_v.mean().item(),
+            "misc/adv_mean": adv.mean().item(),
+            "misc/exp_a_mean": exp_a.mean().item(),
         }

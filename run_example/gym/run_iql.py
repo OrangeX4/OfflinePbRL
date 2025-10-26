@@ -17,15 +17,41 @@ from offlinepbrl.policy_trainer import MFPolicyTrainer
 from offlinepbrl.policy import IQLPolicy
 
 """
-suggested hypers
-expectile=0.7, temperature=3.0 for all D4RL-Gym tasks
+Task-specific optimized hyperparameters based on CORL benchmark.
+These settings match the best-performing configurations from:
+https://github.com/tinkoff-ai/CORL
+
+Key insights:
+- hopper-medium-expert: needs higher beta (6.0) and lower expectile (0.5)
+- hopper-medium-replay: needs slower target updates (tau=0.001)
+- All tasks benefit from state normalization
 """
+
+# Optimized hyperparameters for specific tasks (based on CORL)
+TASK_CONFIGS = {
+    "hopper-medium-expert-v2": {
+        "expectile": 0.5,    # More conservative value estimation
+        "temperature": 6.0,  # Higher beta for expert data
+        "tau": 0.005,
+    },
+    "hopper-medium-replay-v2": {
+        "expectile": 0.7,
+        "temperature": 3.0,
+        "tau": 0.001,        # Slower target updates for stability
+    },
+    "hopper-medium-v2": {
+        "expectile": 0.7,
+        "temperature": 3.0,
+        "tau": 0.005,
+    },
+    # Default settings work well for halfcheetah and walker2d
+}
 
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", type=str, default="gym")
-    parser.add_argument("--algo_name", type=str, default="iql")
+    parser.add_argument("--algo_name", type=str, default="iql_v2")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -35,9 +61,9 @@ def get_args():
     parser.add_argument("--dropout_rate", type=float, default=None)
     parser.add_argument("--lr_decay", type=bool, default=True)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--tau", type=float, default=0.005)
-    parser.add_argument("--expectile", type=float, default=0.7)
-    parser.add_argument("--temperature", type=float, default=3.0)
+    parser.add_argument("--tau", type=float, default=None, help="Target network update rate. If None, use task-specific default.")
+    parser.add_argument("--expectile", type=float, default=None, help="IQL expectile parameter. If None, use task-specific default.")
+    parser.add_argument("--temperature", type=float, default=None, help="IQL temperature (beta). If None, use task-specific default.")
     parser.add_argument("--const_reward", type=float, default=None, help="Set all rewards to this constant value.")
     parser.add_argument("--epoch", type=int, default=1000)
     parser.add_argument("--step_per_epoch", type=int, default=1000)
@@ -46,7 +72,30 @@ def get_args():
     parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Apply task-specific hyperparameters if not explicitly set
+    if args.task in TASK_CONFIGS:
+        task_config = TASK_CONFIGS[args.task]
+        if args.expectile is None:
+            args.expectile = task_config["expectile"]
+            print(f"Using task-specific expectile: {args.expectile}")
+        if args.temperature is None:
+            args.temperature = task_config["temperature"]
+            print(f"Using task-specific temperature: {args.temperature}")
+        if args.tau is None:
+            args.tau = task_config["tau"]
+            print(f"Using task-specific tau: {args.tau}")
+    else:
+        # Use default values for tasks without specific configs
+        if args.expectile is None:
+            args.expectile = 0.7
+        if args.temperature is None:
+            args.temperature = 3.0
+        if args.tau is None:
+            args.tau = 0.005
+    
+    return args
 
 
 def normalize_rewards(dataset):
@@ -95,6 +144,18 @@ def train(args=get_args()):
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
         dataset = normalize_rewards(dataset)
+    
+    # Normalize states (CRITICAL for stability!)
+    state_mean = dataset["observations"].mean(0)
+    state_std = dataset["observations"].std(0) + 1e-3
+    dataset["observations"] = (dataset["observations"] - state_mean) / state_std
+    dataset["next_observations"] = (dataset["next_observations"] - state_mean) / state_std
+    
+    # Wrap env to normalize observations during evaluation
+    def normalize_state(state):
+        return (state - state_mean) / state_std
+    env = gym.wrappers.TransformObservation(env, normalize_state)
+    
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
