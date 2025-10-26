@@ -51,7 +51,7 @@ TASK_CONFIGS = {
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", type=str, default="gym")
-    parser.add_argument("--algo_name", type=str, default="iql_v2")
+    parser.add_argument("--algo_name", type=str, default="iql_v3")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -98,7 +98,12 @@ def get_args():
     return args
 
 
-def normalize_rewards(dataset):
+def normalize_rewards(dataset, env_name, max_episode_steps=1000):
+    """
+    Normalize rewards following CORL's approach.
+    For locomotion tasks: scale rewards to make returns comparable across tasks.
+    """
+    # First, identify trajectory boundaries
     terminals_float = np.zeros_like(dataset["rewards"])
     for i in range(len(terminals_float) - 1):
         if np.linalg.norm(dataset["observations"][i + 1] -
@@ -107,30 +112,31 @@ def normalize_rewards(dataset):
             terminals_float[i] = 1
         else:
             terminals_float[i] = 0
-
     terminals_float[-1] = 1
 
-    # split_into_trajectories
+    # Split into trajectories and compute returns
     trajs = [[]]
     for i in range(len(dataset["observations"])):
-        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], dataset["rewards"][i], 1.0-dataset["terminals"][i],
-                        terminals_float[i], dataset["next_observations"][i]))
+        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], 
+                         dataset["rewards"][i], 1.0 - dataset["terminals"][i],
+                         terminals_float[i], dataset["next_observations"][i]))
         if terminals_float[i] == 1.0 and i + 1 < len(dataset["observations"]):
             trajs.append([])
     
-    def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
-
-        return episode_return
-
-    trajs.sort(key=compute_returns)
-
-    # normalize rewards
-    dataset["rewards"] /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
-    dataset["rewards"] *= 1000.0
-
+    def compute_return(traj):
+        return sum(rew for _, _, rew, _, _, _ in traj)
+    
+    returns = [compute_return(traj) for traj in trajs]
+    min_ret, max_ret = min(returns), max(returns)
+    
+    # Normalize: scale by return range, then scale to max_episode_steps
+    # This makes rewards comparable across different tasks
+    if max_ret - min_ret > 0:
+        dataset["rewards"] = dataset["rewards"] / (max_ret - min_ret) * max_episode_steps
+    
+    print(f"Reward normalization: min_return={min_ret:.2f}, max_return={max_ret:.2f}, "
+          f"reward_range=[{dataset['rewards'].min():.2f}, {dataset['rewards'].max():.2f}]")
+    
     return dataset
 
 
@@ -138,18 +144,21 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
-    if args.const_reward is not None:
-        dataset["rewards"] = np.full_like(dataset["rewards"], args.const_reward)
-    if 'antmaze' in args.task:
-        dataset["rewards"] -= 1.0
-    if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
-        dataset = normalize_rewards(dataset)
     
-    # Normalize states (CRITICAL for stability!)
+    # Normalize states FIRST (before any reward processing that uses state distances)
     state_mean = dataset["observations"].mean(0)
     state_std = dataset["observations"].std(0) + 1e-3
     dataset["observations"] = (dataset["observations"] - state_mean) / state_std
     dataset["next_observations"] = (dataset["next_observations"] - state_mean) / state_std
+    
+    # Then process rewards
+    if args.const_reward is not None:
+        dataset["rewards"] = np.full_like(dataset["rewards"], args.const_reward)
+    elif 'antmaze' in args.task:
+        dataset["rewards"] -= 1.0
+    elif ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
+        # Normalize rewards AFTER state normalization
+        dataset = normalize_rewards(dataset, args.task)
     
     # Wrap env to normalize observations during evaluation
     def normalize_state(state):

@@ -114,20 +114,30 @@ class IQLPolicy(BasePolicy):
         self.critic_q1_optim.step()
         self.critic_q2_optim.step()
 
-        # Sync target network AFTER Q update but BEFORE actor update
+        # Sync target network AFTER Q update
         self._sync_weight()
 
-        # update actor
+        # update actor - use the UPDATED Q network and compute fresh advantage
         with torch.no_grad():
+            # Use target Q (just updated) for advantage computation
+            target_q1 = self.critic_q1_old(obss, actions)
+            target_q2 = self.critic_q2_old(obss, actions)
+            target_q = torch.min(target_q1, target_q2)
+            # Use current V network
             v = self.critic_v(obss)
-            q1, q2 = self.critic_q1_old(obss, actions), self.critic_q2_old(obss, actions)
-            q = torch.min(q1, q2)
-            exp_a = torch.exp((q - v) * self._temperature)
-            exp_a = torch.clip(exp_a, None, 100.0)
+            # Compute advantage
+            adv_actor = target_q - v
+            # Apply AWR weighting with temperature (beta)
+            exp_adv = torch.exp(adv_actor * self._temperature)
+            exp_adv = torch.clamp(exp_adv, max=100.0)
         
         dist = self.actor(obss)
-        log_probs = dist.log_prob(actions).sum(dim=-1, keepdim=False)
-        actor_loss = -(exp_a.squeeze(-1) * log_probs).mean()
+        log_probs = dist.log_prob(actions)
+        # Sum over action dimensions if multi-dimensional
+        if log_probs.dim() > 1:
+            log_probs = log_probs.sum(dim=-1, keepdim=True)
+        
+        actor_loss = -(exp_adv * log_probs).mean()
 
         self.actor_optim.zero_grad()
         actor_loss.backward()
@@ -143,5 +153,6 @@ class IQLPolicy(BasePolicy):
             "misc/v": v.mean().item(),
             "misc/next_v": next_v.mean().item(),
             "misc/adv_mean": adv.mean().item(),
-            "misc/exp_a_mean": exp_a.mean().item(),
+            "misc/adv_actor_mean": adv_actor.mean().item(),
+            "misc/exp_adv_mean": exp_adv.mean().item(),
         }
