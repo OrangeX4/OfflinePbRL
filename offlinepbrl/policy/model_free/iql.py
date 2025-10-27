@@ -80,79 +80,103 @@ class IQLPolicy(BasePolicy):
         return action
     
     def _expectile_regression(self, diff: torch.Tensor) -> torch.Tensor:
+        """
+        Asymmetric L2 loss for expectile regression.
+        When diff > 0 (Q > V): weight with expectile
+        When diff < 0 (Q < V): weight with (1 - expectile)
+        """
         weight = torch.where(diff > 0, self._expectile, (1 - self._expectile))
-        return weight * (diff**2)
+        return weight * (diff ** 2)
     
     def learn(self, batch: Dict, epoch=None, step=None) -> Dict[str, float]:
         obss, actions, next_obss, rewards, terminals = batch["observations"], batch["actions"], \
             batch["next_observations"], batch["rewards"], batch["terminals"]
         
-        # update value net
+        # Step 1: Update V network
         with torch.no_grad():
-            q1, q2 = self.critic_q1_old(obss, actions), self.critic_q2_old(obss, actions)
-            q = torch.min(q1, q2)
+            # Use target Q for V update
+            target_q1 = self.critic_q1_old(obss, actions)
+            target_q2 = self.critic_q2_old(obss, actions)
+            target_q = torch.min(target_q1, target_q2)
+        
+        # Compute V and advantage
         v = self.critic_v(obss)
-        adv = q - v
-        critic_v_loss = self._expectile_regression(adv).mean()
+        adv = target_q - v
+        
+        # Expectile regression loss
+        v_loss = self._expectile_regression(adv).mean()
+        
         self.critic_v_optim.zero_grad()
-        critic_v_loss.backward()
+        v_loss.backward()
         self.critic_v_optim.step()
 
-        # update critic
+        # Step 2: Update Q networks (separately to avoid correlation)
         with torch.no_grad():
             next_v = self.critic_v(next_obss)
             target_q = rewards + self._gamma * (1 - terminals) * next_v
         
-        q1, q2 = self.critic_q1(obss, actions), self.critic_q2(obss, actions)
-        critic_q1_loss = ((q1 - target_q).pow(2)).mean()
-        critic_q2_loss = ((q2 - target_q).pow(2)).mean()
-        critic_q_loss = critic_q1_loss + critic_q2_loss
-
+        # Update Q1
+        q1 = self.critic_q1(obss, actions)
+        q1_loss = ((q1 - target_q) ** 2).mean()
+        
         self.critic_q1_optim.zero_grad()
-        self.critic_q2_optim.zero_grad()
-        critic_q_loss.backward()
+        q1_loss.backward()
         self.critic_q1_optim.step()
+        
+        # Update Q2
+        q2 = self.critic_q2(obss, actions)
+        q2_loss = ((q2 - target_q) ** 2).mean()
+        
+        self.critic_q2_optim.zero_grad()
+        q2_loss.backward()
         self.critic_q2_optim.step()
 
-        # Sync target network AFTER Q update
+        # Step 3: Update target networks
         self._sync_weight()
 
-        # update actor - use the UPDATED Q network and compute fresh advantage
+        # Step 4: Update actor with AWR
         with torch.no_grad():
-            # Use target Q (just updated) for advantage computation
-            target_q1 = self.critic_q1_old(obss, actions)
-            target_q2 = self.critic_q2_old(obss, actions)
-            target_q = torch.min(target_q1, target_q2)
-            # Use current V network
+            # Recompute Q and V after updates
+            q1 = self.critic_q1_old(obss, actions)
+            q2 = self.critic_q2_old(obss, actions)
+            q = torch.min(q1, q2)
             v = self.critic_v(obss)
-            # Compute advantage
-            adv_actor = target_q - v
-            # Apply AWR weighting with temperature (beta)
-            exp_adv = torch.exp(adv_actor * self._temperature)
+            
+            # Compute advantage and AWR weight
+            adv_actor = q - v
+            # Apply temperature (beta) scaling
+            exp_adv = torch.exp(self._temperature * adv_actor)
+            # Clamp to prevent numerical issues
             exp_adv = torch.clamp(exp_adv, max=100.0)
         
+        # Get log probability
         dist = self.actor(obss)
-        log_probs = dist.log_prob(actions)
-        # Sum over action dimensions if multi-dimensional
-        if log_probs.dim() > 1:
-            log_probs = log_probs.sum(dim=-1, keepdim=True)
+        log_prob = dist.log_prob(actions)
         
-        actor_loss = -(exp_adv * log_probs).mean()
-
+        # Handle multi-dimensional actions
+        if log_prob.dim() > 1:
+            log_prob = log_prob.sum(dim=-1, keepdim=True)
+        
+        # AWR loss: maximize weighted log probability
+        actor_loss = -(exp_adv * log_prob).mean()
+        
         self.actor_optim.zero_grad()
         actor_loss.backward()
         self.actor_optim.step()
 
         return {
             "loss/actor": actor_loss.item(),
-            "loss/q1": critic_q1_loss.item(),
-            "loss/q2": critic_q2_loss.item(),
-            "loss/v": critic_v_loss.item(),
+            "loss/q1": q1_loss.item(),
+            "loss/q2": q2_loss.item(),
+            "loss/v": v_loss.item(),
             "misc/q1": q1.mean().item(),
             "misc/q2": q2.mean().item(),
             "misc/v": v.mean().item(),
             "misc/next_v": next_v.mean().item(),
             "misc/adv_mean": adv.mean().item(),
+            "misc/adv_std": adv.std().item(),
             "misc/adv_actor_mean": adv_actor.mean().item(),
+            "misc/adv_actor_std": adv_actor.std().item(),
             "misc/exp_adv_mean": exp_adv.mean().item(),
+            "misc/exp_adv_max": exp_adv.max().item(),
         }

@@ -51,7 +51,7 @@ TASK_CONFIGS = {
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--domain", type=str, default="gym")
-    parser.add_argument("--algo_name", type=str, default="iql_v3")
+    parser.add_argument("--algo_name", type=str, default="iql_v4")
     parser.add_argument("--task", type=str, default="walker2d-medium-expert-v2")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--hidden_dims", type=int, nargs='*', default=[256, 256])
@@ -100,42 +100,55 @@ def get_args():
 
 def normalize_rewards(dataset, env_name, max_episode_steps=1000):
     """
-    Normalize rewards following CORL's approach.
-    For locomotion tasks: scale rewards to make returns comparable across tasks.
+    Normalize rewards following CORL's exact approach.
+    Scale rewards so that return range is normalized to max_episode_steps.
     """
-    # First, identify trajectory boundaries
+    # Identify trajectory boundaries using terminals
     terminals_float = np.zeros_like(dataset["rewards"])
+    
+    # Mark trajectory boundaries
     for i in range(len(terminals_float) - 1):
-        if np.linalg.norm(dataset["observations"][i + 1] -
-                            dataset["next_observations"][i]
-                            ) > 1e-6 or dataset["terminals"][i] == 1.0:
+        # Boundary if: (1) terminal flag is set, OR (2) next_obs discontinuity
+        if dataset["terminals"][i] == 1.0:
+            terminals_float[i] = 1
+        elif np.linalg.norm(dataset["observations"][i + 1] - dataset["next_observations"][i]) > 1e-6:
             terminals_float[i] = 1
         else:
             terminals_float[i] = 0
-    terminals_float[-1] = 1
-
-    # Split into trajectories and compute returns
-    trajs = [[]]
-    for i in range(len(dataset["observations"])):
-        trajs[-1].append((dataset["observations"][i], dataset["actions"][i], 
-                         dataset["rewards"][i], 1.0 - dataset["terminals"][i],
-                         terminals_float[i], dataset["next_observations"][i]))
-        if terminals_float[i] == 1.0 and i + 1 < len(dataset["observations"]):
-            trajs.append([])
     
-    def compute_return(traj):
-        return sum(rew for _, _, rew, _, _, _ in traj)
+    terminals_float[-1] = 1  # Last transition is always terminal
     
-    returns = [compute_return(traj) for traj in trajs]
-    min_ret, max_ret = min(returns), max(returns)
+    # Compute trajectory returns
+    returns = []
+    current_return = 0.0
     
-    # Normalize: scale by return range, then scale to max_episode_steps
-    # This makes rewards comparable across different tasks
-    if max_ret - min_ret > 0:
-        dataset["rewards"] = dataset["rewards"] / (max_ret - min_ret) * max_episode_steps
+    for i in range(len(dataset["rewards"])):
+        current_return += dataset["rewards"][i]
+        if terminals_float[i] == 1.0:
+            returns.append(current_return)
+            current_return = 0.0
     
-    print(f"Reward normalization: min_return={min_ret:.2f}, max_return={max_ret:.2f}, "
-          f"reward_range=[{dataset['rewards'].min():.2f}, {dataset['rewards'].max():.2f}]")
+    if len(returns) == 0:
+        print("WARNING: No trajectories found in dataset!")
+        return dataset
+    
+    min_ret = min(returns)
+    max_ret = max(returns)
+    
+    print(f"Dataset statistics:")
+    print(f"  Number of trajectories: {len(returns)}")
+    print(f"  Return range: [{min_ret:.2f}, {max_ret:.2f}]")
+    print(f"  Mean return: {np.mean(returns):.2f}")
+    print(f"  Reward range before: [{dataset['rewards'].min():.2f}, {dataset['rewards'].max():.2f}]")
+    
+    # Normalize rewards: scale by return range
+    if max_ret - min_ret > 1e-6:
+        scale = max_episode_steps / (max_ret - min_ret)
+        dataset["rewards"] = dataset["rewards"] * scale
+        print(f"  Reward scale factor: {scale:.4f}")
+        print(f"  Reward range after: [{dataset['rewards'].min():.2f}, {dataset['rewards'].max():.2f}]")
+    else:
+        print("  WARNING: max_ret == min_ret, skipping normalization")
     
     return dataset
 
