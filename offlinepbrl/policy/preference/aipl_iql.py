@@ -35,6 +35,7 @@ class AdversarialIPLIQLPolicy(IQLPolicy):
         temperature: float = 0.1,
         reward_reg: float = 0.5,
         adversarial_weight: float = 0.1,  # New: weight for adversarial loss
+        adversarial_type: str = "replay",  # Type of adversarial loss
         reg_replay_weight: Optional[float] = None,
         actor_replay_weight: Optional[float] = None,
         value_replay_weight: Optional[float] = None,
@@ -56,6 +57,7 @@ class AdversarialIPLIQLPolicy(IQLPolicy):
         )
         self.reward_reg = reward_reg
         self.adversarial_weight = adversarial_weight  # New parameter
+        self.adversarial_type = adversarial_type  # Type of adversarial loss
         self.reg_replay_weight = reg_replay_weight
         self.actor_replay_weight = actor_replay_weight
         self.value_replay_weight = value_replay_weight
@@ -156,8 +158,53 @@ class AdversarialIPLIQLPolicy(IQLPolicy):
         # Split Q-values for replay data only
         q1_split = torch.split(q1_pred, split, dim=0)  # Split q1_pred into [pref1, pref2, replay]
         q2_split = torch.split(q2_pred, split, dim=0)  # Split q2_pred into [pref1, pref2, replay]
-        q1_replay, q2_replay = q1_split[2], q2_split[2]  # Get replay part: [R_B, 1]
-        adversarial_loss = (q1_replay.mean() + q2_replay.mean()) / 2  # Minimize Q-values on replay data
+        q1_pref1, q1_pref2, q1_replay = q1_split[0], q1_split[1], q1_split[2]
+        q2_pref1, q2_pref2, q2_replay = q2_split[0], q2_split[1], q2_split[2]
+        
+        # Compute adversarial loss based on type
+        if self.adversarial_type == "replay":
+            adversarial_loss = (q1_replay.mean() + q2_replay.mean()) / 2
+        elif self.adversarial_type == "replay-pref":
+            q_replay_mean = (q1_replay.mean() + q2_replay.mean()) / 2
+            q_pref_mean = (q1_pref1.mean() + q1_pref2.mean() + q2_pref1.mean() + q2_pref2.mean()) / 4
+            adversarial_loss = q_replay_mean - q_pref_mean
+        elif self.adversarial_type == "replay+pref":
+            q_replay_mean = (q1_replay.mean() + q2_replay.mean()) / 2
+            q_pref_mean = (q1_pref1.mean() + q1_pref2.mean() + q2_pref1.mean() + q2_pref2.mean()) / 4
+            adversarial_loss = q_replay_mean + q_pref_mean
+        elif self.adversarial_type == "replay+lose-win":
+            q_replay_mean = (q1_replay.mean() + q2_replay.mean()) / 2
+            # Use labels to determine win/lose trajectories dynamically
+            # When label=1, pref2 wins; when label=0, pref1 wins
+            # Need to reshape Q values first: [F_B*F_S, 1] -> [F_B, F_S, 1]
+            q1_pref1_reshaped = q1_pref1.reshape(F_B, F_S, -1)
+            q1_pref2_reshaped = q1_pref2.reshape(F_B, F_S, -1)
+            q2_pref1_reshaped = q2_pref1.reshape(F_B, F_S, -1)
+            q2_pref2_reshaped = q2_pref2.reshape(F_B, F_S, -1)
+            label_mask = labels[0].unsqueeze(-1).unsqueeze(-1)  # Shape: [F_B, 1, 1]
+            q1_win = torch.where(label_mask == 1, q1_pref2_reshaped, q1_pref1_reshaped)
+            q1_lose = torch.where(label_mask == 0, q1_pref2_reshaped, q1_pref1_reshaped)
+            q2_win = torch.where(label_mask == 1, q2_pref2_reshaped, q2_pref1_reshaped)
+            q2_lose = torch.where(label_mask == 0, q2_pref2_reshaped, q2_pref1_reshaped)
+            q_lose_mean = (q1_lose.mean() + q2_lose.mean()) / 2
+            q_win_mean = (q1_win.mean() + q2_win.mean()) / 2
+            adversarial_loss = q_replay_mean + q_lose_mean - q_win_mean
+        elif self.adversarial_type == "replay-win":
+            q_replay_mean = (q1_replay.mean() + q2_replay.mean()) / 2
+            # Use labels to determine win trajectory
+            # Need to reshape Q values first: [F_B*F_S, 1] -> [F_B, F_S, 1]
+            q1_pref1_reshaped = q1_pref1.reshape(F_B, F_S, -1)
+            q1_pref2_reshaped = q1_pref2.reshape(F_B, F_S, -1)
+            q2_pref1_reshaped = q2_pref1.reshape(F_B, F_S, -1)
+            q2_pref2_reshaped = q2_pref2.reshape(F_B, F_S, -1)
+            label_mask = labels[0].unsqueeze(-1).unsqueeze(-1)  # Shape: [F_B, 1, 1]
+            q1_win = torch.where(label_mask == 1, q1_pref2_reshaped, q1_pref1_reshaped)
+            q2_win = torch.where(label_mask == 1, q2_pref2_reshaped, q2_pref1_reshaped)
+            q_win_mean = (q1_win.mean() + q2_win.mean()) / 2
+            adversarial_loss = q_replay_mean - q_win_mean
+        else:
+            raise ValueError(f"Unknown adversarial_type: {self.adversarial_type}")
+
         
         # Regularization loss
         reg_loss_fb = (r1.square().mean() + r2.square().mean()) / 2

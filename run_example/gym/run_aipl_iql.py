@@ -42,7 +42,9 @@ def get_args():
     
     # A-IPL-IQL specific parameters
     parser.add_argument("--reward_reg", type=float, default=0.5)
-    parser.add_argument("--adversarial_weight", type=float, default=0.1)
+    parser.add_argument("--adversarial_weight", type=float, default=0.2)
+    parser.add_argument("--adversarial_type", type=str, default="replay", 
+                        choices=["replay", "replay-pref", "replay+pref", "replay+lose-win", "replay-win"])
     parser.add_argument("--reg_replay_weight", type=float, default=0.5)
     parser.add_argument("--actor_replay_weight", type=float, default=0.5)
     parser.add_argument("--value_replay_weight", type=float, default=0.5)
@@ -52,6 +54,7 @@ def get_args():
     parser.add_argument("--eval_episodes", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--pref_batch_size", type=int, default=8)
+    parser.add_argument("--pref_mismatch_env", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--eval_freq", type=int, default=1)
 
@@ -98,7 +101,12 @@ def train(args=get_args()):
     # create env and dataset
     env = gym.make(args.task)
     dataset = qlearning_dataset(env)
-    rlhf_dataset = load_rlhf_dataset(env, dataset)
+    if args.pref_mismatch_env is not None:
+        pref_mismatch_env = gym.make(args.pref_mismatch_env)
+        pref_mismatch_dataset = qlearning_dataset(pref_mismatch_env)
+        rlhf_dataset = load_rlhf_dataset(pref_mismatch_env, pref_mismatch_dataset)
+    else:
+        rlhf_dataset = load_rlhf_dataset(env, dataset)
     if 'antmaze' in args.task:
         dataset["rewards"] -= 1.0
     if ("halfcheetah" in args.task or "walker2d" in args.task or "hopper" in args.task):
@@ -165,6 +173,7 @@ def train(args=get_args()):
         temperature=args.temperature,
         reward_reg=args.reward_reg,
         adversarial_weight=args.adversarial_weight,
+        adversarial_type=args.adversarial_type,
         reg_replay_weight=args.reg_replay_weight,
         actor_replay_weight=args.actor_replay_weight,
         value_replay_weight=args.value_replay_weight,
@@ -194,7 +203,10 @@ def train(args=get_args()):
     pref_buffer.load_dataset(rlhf_dataset)
 
     # log
-    log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["adversarial_weight"])
+    if args.pref_mismatch_env is not None:
+        log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["adversarial_weight", "adversarial_type", "pref_mismatch_env"])
+    else:
+        log_dirs = make_log_dirs(args.domain, args.algo_name, args.task, args.seed, vars(args), record_params=["adversarial_weight", "adversarial_type"])
     # key: output file name, value: output handler type
     output_config = {
         "consoleout_backup": "stdout",
